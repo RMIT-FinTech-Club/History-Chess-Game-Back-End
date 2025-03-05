@@ -1,0 +1,52 @@
+import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import UsersService from '../services/users.service.ts';
+
+interface RegisterRequestBody {
+  username: string;
+  email: string;
+  password: string;
+}
+
+interface LoginRequestBody {
+  username: string;
+  password: string;
+}
+
+class UsersController {
+  private usersService: UsersService;
+
+  constructor(fastify: FastifyInstance) {
+    this.usersService = new UsersService(fastify);
+  }
+
+  async register(request: FastifyRequest<{ Body: RegisterRequestBody }>, reply: FastifyReply): Promise<void> {
+    try {
+      const user = await this.usersService.create(request.body);
+      reply.code(201).send(user);
+    } catch (error: any) {
+      reply.code(400).send({ message: error.message });
+    }
+  }
+
+  async login(request: FastifyRequest<{ Body: LoginRequestBody }>, reply: FastifyReply): Promise<void> {
+    try {
+      const result = await this.usersService.login(request.body);
+      reply.send(result);
+    } catch (error: any) {
+      reply.code(401).send({ message: error.message });
+    }
+  }
+
+  async getProfile(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    try {
+      const token = request.headers.authorization?.replace('Bearer ', '');
+      if (!token) throw new Error('No token provided');
+      const user = await this.usersService.verifyToken(token);
+      reply.send({ message: 'Protected data', user });
+    } catch (error: any) {
+      reply.code(401).send({ message: error.message });
+    }
+  }
+}
+
+export default UsersController;
