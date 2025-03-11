@@ -2,6 +2,7 @@
 import Fastify from 'fastify';
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import * as GameController from "./controllers/game.controller"
+import * as GameService from "./services/game.service";
 import fastifyCors from '@fastify/cors';
 
 const server = Fastify({
@@ -50,12 +51,20 @@ server.ready(() => {
         }
     });
 
+    // Set up matching check
+    const matchmakingInterval = setInterval(() => {
+        if (io) {  
+            GameService.checkWaitingPlayersForMatches(io);
+        }
+    }, 1000);
+
     io.on('connection', (socket: Socket) => {
         server.log.info(`Socket connected: ${socket.id}`);
     
-        socket.on('joinGame', (data) => {
+        socket.on('joinGame', (data: { elo: number }) => {
             server.log.info(`\nPlayer ${socket.id} requesting to join game with data: ${JSON.stringify(data)}`);
-            GameController.handleJoinGame(socket, io); 
+            const playerElo = data.elo || 1200; 
+            GameController.handleJoinGame(socket, io, playerElo); 
         });
     
         socket.on('disconnect', (reason: string) => {
@@ -82,3 +91,5 @@ const start = async () => {
 };
 
 start();
+
+
