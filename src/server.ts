@@ -52,16 +52,18 @@ server.ready(() => {
 
     io.on('connection', (socket: Socket) => {
         server.log.info(`Socket connected: ${socket.id}`);
-
-        socket.on('joinGame', () => {
-            GameController.handleJoinGame(socket, io); // Call controller function
+    
+        socket.on('joinGame', (data) => {
+            server.log.info(`\nPlayer ${socket.id} requesting to join game with data: ${JSON.stringify(data)}`);
+            GameController.handleJoinGame(socket, io); 
         });
-
+    
         socket.on('disconnect', (reason: string) => {
-            GameController.handleDisconnect(socket, reason); // Call controller function
+            server.log.info(`Socket disconnected: ${socket.id} due to ${reason}`);
+            GameController.handleDisconnect(socket, reason); 
         });
-
-        socket.emit('welcomeMessage', 'Welcome to the Chess Game Realtime Server (Modular - Functions)!'); // Updated message
+    
+        socket.emit('welcomeMessage', 'Welcome to the Chess Game Realtime Server!');
     });
 });
 
