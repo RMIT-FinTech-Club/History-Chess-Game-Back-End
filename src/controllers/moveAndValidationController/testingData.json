@@ -1,0 +1,44 @@
+[
+    {
+      "description": "Valid move by the correct player",
+      "gameState": {
+        "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "players": { "white": "player1", "black": "player2" },
+        "moveHistory": []
+      },
+      "playerId": "player1",
+      "moveNotation": "e4",
+      "expected": {
+        "valid": true,
+        "nextTurn": "black"
+      }
+    },
+    {
+      "description": "Illegal move by the correct player",
+      "gameState": {
+        "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "players": { "white": "player1", "black": "player2" },
+        "moveHistory": []
+      },
+      "playerId": "player1",
+      "moveNotation": "e5",
+      "expected": {
+        "valid": false,
+        "error": "Illegal move."
+      }
+    },
+    {
+      "description": "Wrong player turn",
+      "gameState": {
+        "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "players": { "white": "player1", "black": "player2" },
+        "moveHistory": []
+      },
+      "playerId": "player2",
+      "moveNotation": "e4",
+      "expected": {
+        "valid": false,
+        "error": "Not your turn."
+      }
+    }
+  ]
