@@ -7,4 +7,5 @@ export default async function (fastify: FastifyInstance): Promise<void> {
   fastify.post('/register', usersController.register.bind(usersController));
   fastify.post('/login', usersController.login.bind(usersController));
   fastify.get('/profile', usersController.getProfile.bind(usersController));
+  fastify.get('/profile/:username', usersController.getUserProfileByUsername.bind(usersController));
 }

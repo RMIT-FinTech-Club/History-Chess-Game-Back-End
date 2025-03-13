@@ -1,15 +1,19 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import UsersService from '../services/users.service.ts';
+import UsersService from '../services/users.service';
 
 interface RegisterRequestBody {
   username: string;
-  email: string;
+  email?: string;
   password: string;
 }
 
 interface LoginRequestBody {
   username: string;
   password: string;
+}
+
+interface GetProfileRequestParams {
+  username: string;
 }
 
 class UsersController {
@@ -21,7 +25,11 @@ class UsersController {
 
   async register(request: FastifyRequest<{ Body: RegisterRequestBody }>, reply: FastifyReply): Promise<void> {
     try {
-      const user = await this.usersService.create(request.body);
+      const user = await this.usersService.createUserProfileService(
+        request.body.username,
+        request.body.password,
+        request.body.email
+      );
       reply.code(201).send(user);
     } catch (error: any) {
       reply.code(400).send({ message: error.message });
@@ -45,6 +53,23 @@ class UsersController {
       reply.send({ message: 'Protected data', user });
     } catch (error: any) {
       reply.code(401).send({ message: error.message });
+    }
+  }
+
+  async getUserProfileByUsername(
+    request: FastifyRequest<{ Params: GetProfileRequestParams }>,
+    reply: FastifyReply
+  ): Promise<void> {
+    try {
+      const { username } = request.params;
+      const user = await this.usersService.getUserProfileByUsernameService(username);
+      reply.send(user);
+    } catch (error: any) {
+      if (error.message === 'User not found') {
+        reply.code(404).send({ message: error.message });
+      } else {
+        reply.code(500).send({ message: error.message });
+      }
     }
   }
 }
