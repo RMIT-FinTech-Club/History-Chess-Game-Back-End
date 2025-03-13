@@ -21,3 +21,5 @@ export const dbConfig: DBConfig = {
         url: process.env.NEON_URL || 'postgresql://user:password@localhost:5432/dbname'
     }
 };
+
+export const fullMongoUrl = `${dbConfig.mongodb.url}${dbConfig.mongodb.database}`;
