@@ -53,31 +53,54 @@ server.ready(() => {
 
     // Set up matching check
     const matchmakingInterval = setInterval(() => {
-        if (io) {  
+        if (io) {
             GameService.checkWaitingPlayersForMatches(io);
         }
     }, 1000);
 
     io.on('connection', (socket: Socket) => {
         server.log.info(`Socket connected: ${socket.id}`);
-    
+
         socket.on('joinGame', (data: { elo: number }) => {
             server.log.info(`\nPlayer ${socket.id} requesting to join game with data: ${JSON.stringify(data)}`);
-            const playerElo = data.elo || 1200; 
-            GameController.handleJoinGame(socket, io, playerElo); 
+            const playerElo = data.elo || 1200;
+            GameController.handleJoinGame(socket, io, playerElo);
         });
-    
+
         socket.on('disconnect', (reason: string) => {
             server.log.info(`Socket disconnected: ${socket.id} due to ${reason}`);
-            GameController.handleDisconnect(socket, reason); 
+            GameController.handleDisconnect(socket, reason);
         });
-    
+
         socket.emit('welcomeMessage', 'Welcome to the Chess Game Realtime Server!');
     });
 });
 
 server.get('/', async (request, reply) => {
     return { hello: 'world from Fastify + Manual Socket.IO (TypeScript ESM)!' };
+});
+
+// Check connection with MongoDB and Neon check route
+fastify.get('/health', async (request, reply) => {
+    try {
+        // Test MongoDB connection
+        await fastify.mongo.db.command({ ping: 2 });
+
+        // Test Neon connection
+        await fastify.neon.query('SELECT 1');
+
+        return {
+            status: 'ok',
+            mongodb: 'connected',
+            neon: 'connected'
+        };
+    } catch (error: any) {
+        reply.status(500).send({
+            status: 'error',
+            message: error.message,
+            details: process.env.NODE_ENV === 'development' ? error : undefined // Optionally include full error details in development
+        });
+    }
 });
 
 const start = async () => {
