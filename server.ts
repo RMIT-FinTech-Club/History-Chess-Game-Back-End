@@ -1,34 +1,37 @@
 import Fastify, { FastifyInstance } from 'fastify';
-import { PrismaClient } from '@prisma/client';
+import { postgresPrisma } from './src/configs/prismaClient';
 import * as dotenv from 'dotenv';
 
 dotenv.config();
 
 const fastify: FastifyInstance = Fastify({ logger: true });
 
-// Initialize Prisma Client
-const prisma = new PrismaClient();
+// Register plugins
+fastify.register(require('./src/plugins/mongodb'));
+fastify.register(require('./src/plugins/neon'));
 
-// Test database connection
-async function connectToDatabase(): Promise<void> {
+// Decorate with Prisma
+fastify.decorate('prisma', postgresPrisma);
+
+// Test database connections
+async function connectToDatabases(): Promise<void> {
   try {
-    await prisma.$connect();
-    fastify.log.info('Connected to NeonDB/PostgreSQL via Prisma');
+    await fastify.mongo.client.connect();
+    await fastify.neon.connect();
+    await postgresPrisma.$connect();
+    fastify.log.info('Connected to MongoDB, NeonDB, and Prisma');
   } catch (error) {
     fastify.log.error('Database connection error:', error);
     process.exit(1);
   }
 }
 
-// Decorate Fastify with Prisma
-fastify.decorate('prisma', prisma);
-
 // Register routes
 fastify.register(require('./src/routes/users.router'), { prefix: '/users' });
 
 // Start server
 const start = async (): Promise<void> => {
-  await connectToDatabase();
+  await connectToDatabases();
   try {
     await fastify.listen({ port: 3000 });
     fastify.log.info('Server running on http://localhost:3000');
@@ -40,7 +43,7 @@ const start = async (): Promise<void> => {
 
 // Cleanup on shutdown
 fastify.addHook('onClose', async () => {
-  await prisma.$disconnect();
+  await postgresPrisma.$disconnect();
   fastify.log.info('Prisma connection closed');
 });
 

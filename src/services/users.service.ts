@@ -1,24 +1,22 @@
 import { FastifyInstance } from 'fastify';
-import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import * as jwt from 'jsonwebtoken';
+import { postgresPrisma } from '../configs/prismaClient';
 
 interface UserProfileResponse {
-  user_id: number;
+  id: string;
   username: string;
   email: string;
-  wallet_address: string | null;
+  walletAddress: string | null;
   elo: number | null;
-  created_time: Date;
-  updated_time: Date;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 class UsersService {
-  private prisma: PrismaClient;
   private jwtSecret: string;
 
   constructor(fastify: FastifyInstance) {
-    this.prisma = fastify.prisma;
     this.jwtSecret = process.env.JWT_SECRET || 'your-secret-key';
   }
 
@@ -49,31 +47,29 @@ class UsersService {
     if (email) this.validateEmail(email);
     this.validatePassword(password);
 
-    const password_hash = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     try {
-      const user = await this.prisma.user.create({
+      const user = await postgresPrisma.users.create({
         data: {
           username,
           email: email || '',
-          password_hash,
-          wallet_address: null,
-          elo: 1500, // Default chess Elo rating
-          created_time: new Date(),
-          updated_time: new Date(),
+          hashedPassword,
+          walletAddress: null,
+          elo: 1500,
         },
         select: {
-          user_id: true,
+          id: true,
           username: true,
           email: true,
-          wallet_address: true,
+          walletAddress: true,
           elo: true,
-          created_time: true,
-          updated_time: true,
+          createdAt: true,
+          updatedAt: true,
         },
       });
 
-      console.log(`User created: ${username} (ID: ${user.user_id}) at ${user.created_time}`);
+      console.log(`User created: ${username} (ID: ${user.id}) at ${user.createdAt}`);
       return user;
     } catch (error: any) {
       if (error.code === 'P2002') {
@@ -89,16 +85,16 @@ class UsersService {
     this.validateUsername(username);
 
     try {
-      const user = await this.prisma.user.findUnique({
+      const user = await postgresPrisma.users.findUnique({
         where: { username },
         select: {
-          user_id: true,
+          id: true,
           username: true,
           email: true,
-          wallet_address: true,
+          walletAddress: true,
           elo: true,
-          created_time: true,
-          updated_time: true,
+          createdAt: true,
+          updatedAt: true,
         },
       });
 
@@ -107,7 +103,7 @@ class UsersService {
         throw new Error('User not found');
       }
 
-      console.log(`User profile retrieved: ${username} (ID: ${user.user_id})`);
+      console.log(`User profile retrieved: ${username} (ID: ${user.id})`);
       return user;
     } catch (error: any) {
       console.error(`Failed to retrieve user profile for ${username}:`, error);
@@ -123,7 +119,7 @@ class UsersService {
     username: string;
     password: string;
   }): Promise<{ access_token: string; user: UserProfileResponse }> {
-    const user = await this.prisma.user.findUnique({
+    const user = await postgresPrisma.users.findUnique({
       where: { username },
     });
 
@@ -132,24 +128,24 @@ class UsersService {
       throw new Error('User not found');
     }
 
-    const isMatch = await bcrypt.compare(password, user.password_hash);
+    const isMatch = await bcrypt.compare(password, user.hashedPassword);
     if (!isMatch) {
       console.log(`Login failed: Invalid credentials for ${username}`);
       throw new Error('Invalid credentials');
     }
 
-    const token = jwt.sign({ sub: user.user_id, username }, this.jwtSecret, { expiresIn: '1h' });
+    const token = jwt.sign({ sub: user.id, username }, this.jwtSecret, { expiresIn: '1h' });
     console.log(`User ${username} logged in successfully`);
     return {
       access_token: token,
       user: {
-        user_id: user.user_id,
+        id: user.id,
         username: user.username,
         email: user.email,
-        wallet_address: user.wallet_address,
+        walletAddress: user.walletAddress,
         elo: user.elo,
-        created_time: user.created_time,
-        updated_time: user.updated_time,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
       },
     };
   }
