@@ -3,7 +3,7 @@ import { postgresPrisma } from "../src/configs/prismaClient";
 async function seedNeon() {
     try {
         console.log("Seeding data for NeonDB");
-        
+
         // Insert Users
         const users = await postgresPrisma.users.createMany({
             data: [
@@ -32,7 +32,7 @@ async function seedNeon() {
             skipDuplicates: true,
         });
         console.log(`${users.count} Users Created`);
-        
+
         // Insert NFTs:
         const nfts = await postgresPrisma.nfts.createMany({
             data: [

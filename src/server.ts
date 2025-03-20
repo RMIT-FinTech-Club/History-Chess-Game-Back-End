@@ -1,13 +1,24 @@
 // backend/manual-realtime-server.ts (TypeScript with ES Modules)
-import Fastify from 'fastify';
+import Fastify, { FastifyInstance } from 'fastify';
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import * as GameController from "./controllers/game.controller"
 import * as GameService from "./services/game.service";
 import fastifyCors from '@fastify/cors';
+import neonPlugin from './plugins/neon';
+import mongodbPlugin from './plugins/mongodb';
+import websocketPlugin from './plugins/websocket';
+import prismaPlugin from './plugins/prisma';
+import gameRoutes from './routes/game.routes';
 
 const server = Fastify({
     logger: true // Optional: Enable Fastify logger for debugging
 });
+
+server.register(mongodbPlugin)
+server.register(neonPlugin)
+server.register(websocketPlugin)
+server.register(prismaPlugin)
+server.register(gameRoutes)
 
 server.register(fastifyCors, {
     origin: "http://localhost:3000", // Allow requests from your React frontend origin
@@ -81,13 +92,13 @@ server.get('/', async (request, reply) => {
 });
 
 // Check connection with MongoDB and Neon check route
-fastify.get('/health', async (request, reply) => {
+server.get('/health', async (request, reply) => {
     try {
         // Test MongoDB connection
-        await fastify.mongo.db.command({ ping: 2 });
+        // await server.mongo.connect.command({ ping: 2 });
 
         // Test Neon connection
-        await fastify.neon.query('SELECT 1');
+        await server.neon.query('SELECT 1');
 
         return {
             status: 'ok',
