@@ -84,6 +84,11 @@ server.ready(() => {
         });
 
         socket.emit('welcomeMessage', 'Welcome to the Chess Game Realtime Server!');
+
+
+        socket.on('makeMove', (data: { gameId: string, move: string }) => {
+            GameService.handleMove(socket, io, data.gameId, data.move);
+        });
     });
 });
 
@@ -125,5 +130,8 @@ const start = async () => {
 };
 
 start();
+
+
+
 
 

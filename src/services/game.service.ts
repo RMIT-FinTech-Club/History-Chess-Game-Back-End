@@ -8,6 +8,7 @@ interface GameSession {
     gameId: string;
     playerSockets: Socket[];
     gameState: string;
+    chess: Chess;
 }
 
 interface WaitingPlayer {
@@ -262,14 +263,81 @@ const generateGameId = (): string => {
 
 export const createNewGameSession = (socket1: Socket, socket2: Socket): GameSession => {
     const gameId = generateGameId()
+    const chess = new Chess()
     const newGame: GameSession = {
         gameId: gameId,
         playerSockets: [socket1, socket2],
-        gameState: new Chess().fen(),
+        gameState: chess.fen(),
+        chess: chess
     }
     gameSessions[gameId] = newGame
     return newGame
 }
+
+export const handleMove = (socket: Socket, io: SocketIOServer, gameId: string, move: string) => {
+    const session = gameSessions[gameId];
+    if (!session) {
+        socket.emit('error', { message: 'Game session not found' });
+        return;
+    }
+
+    try {
+        session.chess.move(move);
+        session.gameState = session.chess.fen();
+
+
+        io.to(gameId).emit('moveMade',{
+            fen: session.gameState,
+            move: move
+        })
+
+        if (session.chess.isGameOver()) {
+            let result = {
+                status: 'gameOver',
+                reason: '',
+                winner: '',
+                winnerId:''
+            }
+
+            if (session.chess.isCheckmate()) {
+                result.reason = 'checkmate';
+                result.winner = session.chess.turn() === 'w' ? 'black' : 'white';
+                
+                // Who join first is white so if the current turn is white, black wins
+                // result.winnerId = session.chess.turn() === 'w'? session.playerSockets[1].id : session.playerSockets[0].id;
+                // console.log("Winner is: ",  result.winnerId);
+
+            } else if (session.chess.isDraw()) {
+                result.reason = 'draw';
+                if (session.chess.isStalemate()) {
+                    result.reason = 'draw by stalemate';
+                    console.log("Stalemate")
+                } else if (session.chess.isThreefoldRepetition()) {
+                    result.reason = 'draw by repetition';
+                    console.log("Repetition")
+                } else if (session.chess.isInsufficientMaterial()) {
+                    result.reason = 'draw by insufficient material';
+                    console.log("insufficient material")
+                }
+            }
+
+            io.to(gameId).emit('gameOver', result);
+            delete gameSessions[gameId];
+        }
+
+
+
+
+
+    }
+    catch (error) {
+        socket.emit('error', { message: 'Invalid move' });
+    }
+}
+
+
+
+
 
 export const joinGame = (socket: Socket, io: SocketIOServer, playerElo: number) => {
     // First check if this player is already in the waiting list
