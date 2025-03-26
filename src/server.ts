@@ -75,7 +75,11 @@ server.ready(() => {
         socket.on('joinGame', (data: { elo: number }) => {
             server.log.info(`\nPlayer ${socket.id} requesting to join game with data: ${JSON.stringify(data)}`);
             const playerElo = data.elo || 1200;
-            GameController.handleJoinGame(socket, io, playerElo);
+            // Update to pass an object with userId and elo properties
+            GameController.handleJoinGame(socket, io, { 
+                userId: socket.id, // Use socket.id as userId for now
+                elo: playerElo 
+            });
         });
 
         socket.on('disconnect', (reason: string) => {

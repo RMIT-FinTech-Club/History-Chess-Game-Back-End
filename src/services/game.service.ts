@@ -4,16 +4,20 @@ import { PrismaClient } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import { GameSession, IGameSession } from '../models/GameSession';
 import { PlayMode, GameResult, GameStatus } from '../types/enum';
+
 interface GameSession {
     gameId: string;
     playerSockets: Socket[];
     gameState: string;
     chess: Chess;
+    whitePlayerId?: string;
+    blackPlayerId?: string;
 }
 
 interface WaitingPlayer {
     socket: Socket;
     elo: number;
+    userId: string; // Add userId to track the actual user
 }
 
 export const createGame = async (
@@ -261,6 +265,7 @@ const generateGameId = (): string => {
     return Math.random().toString(36).substring(2, 15);
 }
 
+// Keep this declaration (around line 265)
 export const createNewGameSession = (socket1: Socket, socket2: Socket): GameSession => {
     const gameId = generateGameId()
     const chess = new Chess()
@@ -339,22 +344,52 @@ export const handleMove = (socket: Socket, io: SocketIOServer, gameId: string, m
 
 
 
-export const joinGame = (socket: Socket, io: SocketIOServer, playerElo: number) => {
-    // First check if this player is already in the waiting list
-    const existingPlayerIndex = waitingPlayers.findIndex(player => player.socket.id === socket.id);
-    if (existingPlayerIndex !== -1) {
-        io.to(socket.id).emit('alreadyWaiting');
-        console.log("Player already in waiting list", socket.id);
-        return;
+export const joinGame = async (socket: Socket, io: SocketIOServer, playerData: { userId: string, elo: number }) => {
+    try {
+        // Get the latest ELO from the database instead of using the passed value
+        const prisma = new PrismaClient();
+        const user = await prisma.users.findUnique({
+            where: { id: playerData.userId }
+        });
+        
+        if (!user) {
+            io.to(socket.id).emit('error', { message: 'User not found' });
+            return;
+        }
+        
+        // Use the ELO from the database
+        const userElo = user.elo;
+        
+        // First check if this player is already in the waiting list
+        const existingPlayerIndex = waitingPlayers.findIndex(player => 
+            player.socket.id === socket.id || player.userId === playerData.userId
+        );
+        
+        if (existingPlayerIndex !== -1) {
+            io.to(socket.id).emit('alreadyWaiting');
+            console.log("Player already in waiting list", socket.id, playerData.userId);
+            return;
+        }
+
+        // Add the new player to waiting list with userId and database ELO
+        waitingPlayers.push({ 
+            socket, 
+            elo: userElo, // Use ELO from database
+            userId: playerData.userId 
+        });
+        
+        io.to(socket.id).emit('waitingForOpponent');
+        console.log("Player added to waiting list", socket.id, "User ID:", playerData.userId, "ELO:", userElo);
+
+        // Immediately try to find a match
+        checkWaitingPlayersForMatches(io);
+        
+        // Disconnect Prisma client
+        await prisma.$disconnect();
+    } catch (error) {
+        console.error("Error in joinGame:", error);
+        io.to(socket.id).emit('error', { message: 'Failed to join game' });
     }
-
-    // Add the new player to waiting list
-    waitingPlayers.push({ socket, elo: playerElo });
-    io.to(socket.id).emit('waitingForOpponent');
-    console.log("Player added to waiting list", socket.id);
-
-    // Immediately try to find a match
-    checkWaitingPlayersForMatches(io);
 }
 
 export const checkWaitingPlayersForMatches = (io: SocketIOServer) => {
@@ -366,8 +401,10 @@ export const checkWaitingPlayersForMatches = (io: SocketIOServer) => {
         for (let j = i + 1; j < waitingPlayers.length; j++) {
             const opponent = waitingPlayers[j];
 
-            if (Math.abs(player.elo - opponent.elo) <= 1000) {
+            // Make sure we're not matching the same user (in case they have multiple connections)
+            if (player.userId === opponent.userId) continue;
 
+            if (Math.abs(player.elo - opponent.elo) <= 1000) {
                 // Remove both players from waiting list 
                 waitingPlayers.splice(j, 1);
                 waitingPlayers.splice(i, 1);
@@ -375,13 +412,35 @@ export const checkWaitingPlayersForMatches = (io: SocketIOServer) => {
                 const gameSession = createNewGameSession(player.socket, opponent.socket);
                 const gameId = gameSession.gameId;
 
+                // Store user IDs in the game session for later reference
+                gameSession.whitePlayerId = player.userId;
+                gameSession.blackPlayerId = opponent.userId;
+
                 player.socket.join(gameId);
                 opponent.socket.join(gameId);
 
-                io.to(gameId).emit('gameStart', { gameId: gameId, initialGameState: gameSessions[gameId].gameState });
-                io.to(player.socket.id).emit('gameJoined', { gameId: gameId, playerColor: 'white' });
-                io.to(opponent.socket.id).emit('gameJoined', { gameId: gameId, playerColor: 'black' });
-                console.log("Successfully matched players", player.socket.id, "and", opponent.socket.id);
+                io.to(gameId).emit('gameStart', { 
+                    gameId: gameId, 
+                    initialGameState: gameSessions[gameId].gameState,
+                    whitePlayerId: player.userId,
+                    blackPlayerId: opponent.userId
+                });
+                
+                io.to(player.socket.id).emit('gameJoined', { 
+                    gameId: gameId, 
+                    playerColor: 'white',
+                    opponentId: opponent.userId 
+                });
+                
+                io.to(opponent.socket.id).emit('gameJoined', { 
+                    gameId: gameId, 
+                    playerColor: 'black',
+                    opponentId: player.userId 
+                });
+                
+                console.log("Successfully matched players", 
+                    "White:", player.userId, "(Socket:", player.socket.id, ")",
+                    "Black:", opponent.userId, "(Socket:", opponent.socket.id, ")");
 
                 i--;
                 break;
@@ -389,6 +448,10 @@ export const checkWaitingPlayersForMatches = (io: SocketIOServer) => {
         }
     }
 }
+
+
+
+
 
 export const handleDisconnect = (socket: Socket, reason: string) => {
     const index = waitingPlayers.findIndex(player => player.socket.id === socket.id);

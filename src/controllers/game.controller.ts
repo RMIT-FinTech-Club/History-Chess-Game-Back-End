@@ -3,8 +3,8 @@ import * as GameServices from '../services/game.service';
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { createGame, findMatch } from '../services/game.service';
 
-export const handleJoinGame = (socket: Socket, io: SocketIOServer, playerElo: number): void => {
-    GameServices.joinGame(socket, io, playerElo);
+export const handleJoinGame = (socket: Socket, io: SocketIOServer, data: { userId: string, elo: number }): void => {
+    GameServices.joinGame(socket, io, data);
 }
 
 export const handleDisconnect = (socket: Socket, reason: string): void => {
