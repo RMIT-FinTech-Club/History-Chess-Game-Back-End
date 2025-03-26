@@ -5,22 +5,12 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
     "outDir": "./dist",
     "rootDir": "./",
     "sourceMap": true,
-    "resolveJsonModule": true,
     "noImplicitAny": true,
     "moduleResolution": "node"
   },
-  "include": [
-    "src/**/*",
-    "server.ts",
-    "prisma/seedNeon.ts",
-    "src/types/**/*"  // Ensure this line is present
-  ],
-  "exclude": [
-    "node_modules",
-    "dist"
-  ]
+  "include": ["src/**/*", "server.ts", "prisma/**/*"],
+  "exclude": ["node_modules", "dist"]
 }

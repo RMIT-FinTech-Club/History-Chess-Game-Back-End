@@ -1,11 +1,17 @@
 import { FastifyInstance } from 'fastify';
 import UsersController from '../controllers/users.controller';
+import { authMiddleware } from '../middleware/auth';
 
-export default async function (fastify: FastifyInstance): Promise<void> {
+interface ProfileRoute {
+  Params: { username: string };
+}
+
+export default async function (fastify: FastifyInstance) {
   const usersController = new UsersController(fastify);
 
   fastify.post('/register', usersController.register.bind(usersController));
   fastify.post('/login', usersController.login.bind(usersController));
-  fastify.get('/profile', usersController.getProfile.bind(usersController));
-  fastify.get('/profile/:username', usersController.getUserProfileByUsername.bind(usersController));
+
+  fastify.get('/profile', { preHandler: authMiddleware }, usersController.getProfile.bind(usersController));
+  fastify.get<ProfileRoute>('/profile/:username', { preHandler: authMiddleware }, usersController.getUserByUsername.bind(usersController));
 }

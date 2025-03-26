@@ -11,4 +11,10 @@ declare module 'fastify' {
     };
     neon: Pool;
   }
+  interface FastifyRequest {
+    user?: {
+      id: string;
+      username: string;
+    };
+  }
 }
