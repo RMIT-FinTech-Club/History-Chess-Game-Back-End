@@ -10,14 +10,17 @@ import websocketPlugin from './plugins/websocket';
 import prismaPlugin from './plugins/prisma';
 import gameRoutes from './routes/game.routes';
 
-const server = Fastify({
-    logger: true // Optional: Enable Fastify logger for debugging
-});
+// const server = Fastify({
+//     logger: true // Optional: Enable Fastify logger for debugging
+// });
+
+const server: FastifyInstance = Fastify({ logger: true });
+
 
 server.register(mongodbPlugin)
 server.register(neonPlugin)
 server.register(websocketPlugin)
-server.register(prismaPlugin)
+// server.register(prismaPlugin)
 server.register(gameRoutes)
 
 server.register(fastifyCors, {
@@ -28,7 +31,7 @@ server.register(fastifyCors, {
 
 let io: SocketIOServer; // Explicitly type 'io' as SocketIOServer
 
-// server.ready(() => {
+
 //     // Create Socket.IO server, passing Fastify's HTTP server
 //     io = new SocketIOServer(server.server, {
 //         // Socket.IO options can be configured here if needed
@@ -104,7 +107,7 @@ server.get('/', async (request, reply) => {
 server.get('/health', async (request, reply) => {
     try {
         // Test MongoDB connection
-        // await server.mongo.connect.command({ ping: 2 });
+        // await fastify.mongo.db.command({ ping: 2 });
 
         // Test Neon connection
         await server.neon.query('SELECT 1');
@@ -134,8 +137,5 @@ const start = async () => {
 };
 
 start();
-
-
-
 
 
