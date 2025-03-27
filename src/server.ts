@@ -9,9 +9,56 @@ import mongodbPlugin from './plugins/mongodb';
 import websocketPlugin from './plugins/websocket';
 import prismaPlugin from './plugins/prisma';
 import gameRoutes from './routes/game.routes';
+import userRoutes from './routes/user.routes';
 
 const server = Fastify({
     logger: true // Optional: Enable Fastify logger for debugging
+});
+
+// Register Swagger plugins first
+server.register(import('@fastify/swagger'), {
+    swagger: {
+        info: {
+            title: 'Vietnamese History Chess Game API',
+            description: 'API documentation for the Chess Game backend service',
+            version: '1.0.0'
+        },
+        externalDocs: {
+            url: 'https://github.com/your-repo/History-Chess-Game-Back-End',
+            description: 'The remote repo for backend'
+        },
+        host: 'localhost:8000',
+        schemes: ['http'],
+        consumes: ['application/json'],
+        produces: ['application/json'],
+        tags: [
+            { name: 'game', description: 'Game related endpoints' },
+            { name: 'user', description: 'User profile related endpoints' },
+            {name: 'socket', description: 'Socket.IO events documentation'}
+        ],
+        securityDefinitions: {
+            bearerAuth: {
+                type: 'apiKey',
+                name: 'Authorization',
+                in: 'header'
+            }
+        },
+    }
+});
+
+// Register Swagger UI
+server.register(import('@fastify/swagger-ui'), {
+    routePrefix: '/documentation',
+    uiConfig: {
+        docExpansion: 'list',
+        deepLinking: true
+    },
+    uiHooks: {
+        onRequest: function(request, reply, next){ next(); },
+        preHandler: function(request, reply, next){ next(); }
+    },
+    staticCSP: true,
+    transformStaticCSP: (header) => header,
 });
 
 server.register(mongodbPlugin)
@@ -19,12 +66,14 @@ server.register(neonPlugin)
 server.register(websocketPlugin)
 server.register(prismaPlugin)
 server.register(gameRoutes)
+server.register(userRoutes, { prefix: '/api' })
 
 server.register(fastifyCors, {
     origin: "http://localhost:3000", // Allow requests from your React frontend origin
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],         // Allowed HTTP methods
     credentials: true,
 })
+
 
 let io: SocketIOServer; // Explicitly type 'io' as SocketIOServer
 
@@ -61,31 +110,31 @@ server.ready(() => {
             methods: ["GET", "POST", "PUT", "DELETE"]
         }
     });
-
+    
     // Set up matching check
     const matchmakingInterval = setInterval(() => {
         if (io) {
             GameService.checkWaitingPlayersForMatches(io);
         }
     }, 1000);
-
+    
     io.on('connection', (socket: Socket) => {
         server.log.info(`Socket connected: ${socket.id}`);
-
+        
         socket.on('joinGame', (data: { elo: number }) => {
             server.log.info(`\nPlayer ${socket.id} requesting to join game with data: ${JSON.stringify(data)}`);
             const playerElo = data.elo || 1200;
             GameController.handleJoinGame(socket, io, playerElo);
         });
-
+        
         socket.on('disconnect', (reason: string) => {
             server.log.info(`Socket disconnected: ${socket.id} due to ${reason}`);
             GameController.handleDisconnect(socket, reason);
         });
-
+        
         socket.emit('welcomeMessage', 'Welcome to the Chess Game Realtime Server!');
-
-
+        
+        
         socket.on('makeMove', (data: { gameId: string, move: string }) => {
             GameService.handleMove(socket, io, data.gameId, data.move);
         });
@@ -101,10 +150,10 @@ server.get('/health', async (request, reply) => {
     try {
         // Test MongoDB connection
         // await server.mongo.connect.command({ ping: 2 });
-
+        
         // Test Neon connection
         await server.neon.query('SELECT 1');
-
+        
         return {
             status: 'ok',
             mongodb: 'connected',
