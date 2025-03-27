@@ -11,8 +11,7 @@ let player2Color: string;
 // Player 1 listeners
 player1.on('connect', () => {
     console.log('Player 1 connected');
-    // Join game with ELO
-    player1.emit('joinGame', { elo: 1500 });
+    player1.emit('joinGame', { userId: "38f09fb3-89df-44f3-a87f-1811325bfe1c" });
 });
 
 player1.on('gameJoined', (data: { gameId: string, playerColor: string }) => {
@@ -21,19 +20,41 @@ player1.on('gameJoined', (data: { gameId: string, playerColor: string }) => {
     player1Color = data.playerColor;
 });
 
-player1.on('moveMade', (data: { fen: string, move: string }) => {
+player1.on('moveMade', (data: { 
+    fen: string, 
+    move: string,
+    gameState: {
+        turn: string,
+        inCheck: boolean,
+        gameOver: boolean,
+        whiteTimeLeft: number,
+        blackTimeLeft: number
+    }
+}) => {
     console.log('Move made:', data);
+    console.log('Current game state:', data.gameState);
 });
 
-player1.on('gameOver', (result) => {
+player1.on('gameOver', (result: {
+    status: string,
+    reason: string,
+    winner: string,
+    winnerId: string,
+    eloUpdate?: {
+        whiteElo: number,
+        blackElo: number
+    }
+}) => {
     console.log('Game Over:', result);
+    if (result.eloUpdate) {
+        console.log('ELO Updates:', result.eloUpdate);
+    }
 });
 
 // Player 2 listeners
 player2.on('connect', () => {
     console.log('Player 2 connected');
-    // Join game with similar ELO to match with player 1
-    player2.emit('joinGame', { elo: 1250 });
+    player2.emit('joinGame', { userId: "64ca2824-056b-4f52-b75e-9924fee71eef" });
 });
 
 player2.on('gameJoined', (data: { gameId: string, playerColor: string }) => {
@@ -41,41 +62,45 @@ player2.on('gameJoined', (data: { gameId: string, playerColor: string }) => {
     player2Color = data.playerColor;
 });
 
-// Simulate the fool's mate (shortest possible checkmate)
-// setTimeout(() => {
-//     if (player1Color === 'white') {
-//         console.log('Player 1 (White) making move: f3');
-//         player1.emit('makeMove', { gameId, move: 'f9' });
-        
-//         setTimeout(() => {
-//             console.log('Player 2 (Black) making move: e5');
-//             player2.emit('makeMove', { gameId, move: 'e5' });
-            
-//             setTimeout(() => {
-//                 console.log('Player 1 (White) making move: g4');
-//                 player1.emit('makeMove', { gameId, move: 'g4' });
-                
-//                 setTimeout(() => {
-//                     console.log('Player 2 (Black) making move: Qh4#');
-//                     player2.emit('makeMove', { gameId, move: 'Qh4' });
-//                 }, 1000);
-//             }, 1000);
-//         }, 1000);
-//     } 
-    
+player2.on('moveMade', (data: {
+    fen: string,
+    move: string,
+    gameState: {
+        turn: string,
+        inCheck: boolean,
+        gameOver: boolean,
+        whiteTimeLeft: number,
+        blackTimeLeft: number
+    }
+}) => {
+    console.log('Move made:', data);
+    console.log('Current game state:', data.gameState);
+});
 
-    
-// }, 2000);
+player2.on('gameOver', (result: {
+    status: string,
+    reason: string,
+    winner: string,
+    winnerId: string,
+    eloUpdate?: {
+        whiteElo: number,
+        blackElo: number
+    }
+}) => {
+    console.log('Game Over:', result);
+    if (result.eloUpdate) {
+        console.log('ELO Updates:', result.eloUpdate);
+    }
+});
 
 // Handle errors
-player1.on('error', (error) => {
+player1.on('error', (error: { message: string, code?: string }) => {
     console.error('Player 1 error:', error);
 });
 
-player2.on('error', (error) => {
+player2.on('error', (error: { message: string, code?: string }) => {
     console.error('Player 2 error:', error);
 });
-
 
 // Simulate different scenarios based on a scenario parameter
 const simulateGame = (scenario: string) => {
@@ -83,16 +108,13 @@ const simulateGame = (scenario: string) => {
         if (player1Color === 'white') {
             switch (scenario) {
                 case 'invalid_move':
-                    // Try an invalid move
                     console.log('Testing invalid move scenario');
-                    player1.emit('makeMove', { gameId, move: 'e9' }); // Invalid square
+                    player1.emit('makeMove', { gameId, move: 'e9' });
                     break;
 
                 case 'insufficient_material':
-                    // King vs King endgame
                     console.log('Testing insufficient material scenario');
                     const insufficientMaterialMoves = [
-                        // Moves from the provided image
                         { player: player1, move: 'e4' },
                         { player: player2, move: 'd5' },
                         { player: player1, move: 'exd5' },
@@ -132,7 +154,6 @@ const simulateGame = (scenario: string) => {
                     break;
 
                 case 'stalemate':
-                    // Common stalemate position
                     console.log('Testing stalemate scenario');
                     const stalemateMoves = [
                         { player: player1, move: 'e3' },
@@ -159,7 +180,6 @@ const simulateGame = (scenario: string) => {
                     break;
 
                 case 'repetition':
-                    // Three-fold repetition
                     console.log('Testing repetition scenario');
                     const repetitionMoves = [
                         { player: player1, move: 'Nf3' },
@@ -179,26 +199,20 @@ const simulateGame = (scenario: string) => {
                     playMoveSequence(repetitionMoves);
                     break;
 
-                
-                    
                 case 'checkmate':
-           
                     console.log('Testing checkmate scenario (fool\'s mate)');
                     const checkmateMoves = [
                         { player: player1, move: 'f3' },
                         { player: player2, move: 'e5' },
                         { player: player1, move: 'g4' },
-                        { player: player2, move: 'Qh4' } 
+                        { player: player2, move: 'Qh4' }
                     ];
                     playMoveSequence(checkmateMoves);
                     break;
-                    
-                
             }
         }
     }, 2000);
 };
-
 
 const playMoveSequence = (moves: Array<{ player: Socket, move: string }>) => {
     moves.forEach((moveData, index) => {
@@ -209,5 +223,5 @@ const playMoveSequence = (moves: Array<{ player: Socket, move: string }>) => {
     });
 };
 
-
-simulateGame('checkmate'); 
+// Start the test with checkmate scenario
+simulateGame('checkmate');

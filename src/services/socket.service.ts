@@ -1,225 +1,205 @@
-import { Server as SocketIOServer, Socket } from "socket.io"
-import { Chess } from "chess.js"
-import fastify, { FastifyInstance } from "fastify"
-import { GameSession, IGameSession } from "../models/GameSession"
-import { GameStatus } from '../types/enum'
-import { saveGameResult, saveMove, updateElo } from "./game.service"
+import { Socket, Server as SocketIOServer } from 'socket.io';
+import { Chess } from 'chess.js';
+import { PrismaClient } from '@prisma/client';
+import { v4 as uuidv4 } from 'uuid';
+import { GameSession, IGameSession } from '../models/GameSession';
+import { PlayMode, GameResult, GameStatus } from '../types/enum';
+import * as gameService from "./game.service";
 
-interface GameSessionInterface {
-    gameId: string;
-    players: string[];
-    chess: Chess;
-    status: GameStatus;
-    whiteTimeLeft: number;
-    blackTimeLeft: number;
-    timer?: NodeJS.Timeout
+interface WaitingPlayer {
+    socket: Socket;
+    elo: number;
+    userId: string; // Add userId to track the actual user
 }
+const waitingPlayers: WaitingPlayer[] = [];
 
-const gameSessions = new Map<string, GameSessionInterface>();
 
-const startTimer = (session: GameSessionInterface, io: SocketIOServer, fastify: FastifyInstance): void => {
-    if (session.timer) clearInterval(session.timer);
 
-    session.timer = setInterval(() => {
-        const isWhiteTurn: boolean = session.chess.turn() === "w";
-        if (isWhiteTurn) {
-            session.whiteTimeLeft -= 1000;
-            if (session.whiteTimeLeft <= 0) {
-                endGame(fastify, session, io, 'Black wins by time');
+
+
+
+export const checkWaitingPlayersForMatches = (io: SocketIOServer, prisma?: PrismaClient) => {
+    if (waitingPlayers.length < 2) return;
+
+    for (let i = 0; i < waitingPlayers.length; i++) {
+        const player = waitingPlayers[i];
+
+        for (let j = i + 1; j < waitingPlayers.length; j++) {
+            const opponent = waitingPlayers[j];
+
+            // Make sure we're not matching the same user (in case they have multiple connections)
+            if (player.userId === opponent.userId) continue;
+
+            if (Math.abs(player.elo - opponent.elo) <= 1000) {
+                // Remove both players from waiting list 
+                waitingPlayers.splice(j, 1);
+                waitingPlayers.splice(i, 1);
+
+                // Create game session in memory
+                const gameSession = gameService.createNewGameSession(player.socket, opponent.socket);
+                const gameId = gameSession.gameId;
+
+                // Store user IDs in the game session for later reference
+                gameSession.whitePlayerId = player.userId;
+                gameSession.blackPlayerId = opponent.userId;
+
+                // Create game session in database
+                gameService.createGameSessionInDatabase(gameId, player.userId, opponent.userId);
+
+                player.socket.join(gameId);
+                opponent.socket.join(gameId);
+
+                io.to(gameId).emit('gameStart', {
+                    gameId: gameId,
+                    initialGameState: gameService.gameSessions[gameId].gameState,
+                    whitePlayerId: player.userId,
+                    blackPlayerId: opponent.userId
+                });
+
+                io.to(player.socket.id).emit('gameJoined', {
+                    gameId: gameId,
+                    playerColor: 'white',
+                    opponentId: opponent.userId
+                });
+
+                io.to(opponent.socket.id).emit('gameJoined', {
+                    gameId: gameId,
+                    playerColor: 'black',
+                    opponentId: player.userId
+                });
+
+                console.log("Successfully matched players",
+                    "White:", player.userId, "(Socket:", player.socket.id, ")",
+                    "Black:", opponent.userId, "(Socket:", opponent.socket.id, ")");
+
+                i--;
+                break;
             }
-        } else {
-            session.blackTimeLeft -= 1000;
-            if (session.blackTimeLeft <= 0) {
-                endGame(fastify, session, io, 'White wins by time');
+        }
+    }
+}
+
+
+export const handleDisconnect = async (socket: Socket, reason: string) => {
+    // Remove from waiting list if player was waiting
+    const index = waitingPlayers.findIndex(player => player.socket.id === socket.id);
+    if (index > -1) {
+        waitingPlayers.splice(index, 1);
+        console.log(`Player removed from waiting list. Reason: ${reason}`);
+    }
+
+    // Handle disconnection from active games
+    for (const gameId in gameService.gameSessions) {
+        const session = gameService.gameSessions[gameId];
+        const playerIndex = session.playerSockets.findIndex(s => s.id === socket.id);
+
+        if (playerIndex > -1) {
+            const otherPlayerIndex = playerIndex === 0 ? 1 : 0;
+            const disconnectedPlayerId = playerIndex === 0 ? session.whitePlayerId : session.blackPlayerId;
+            const remainingPlayerId = playerIndex === 0 ? session.blackPlayerId : session.whitePlayerId;
+            
+            // Notify the other player
+            if (session.playerSockets[otherPlayerIndex]) {
+                session.playerSockets[otherPlayerIndex].emit('opponentDisconnected', { gameId });
             }
-        }
 
-        io.to(session.gameId).emit('timeUpdate', {
-            whiteTimeLeft: session.whiteTimeLeft,
-            blackTimeLeft: session.blackTimeLeft
-        })
-    }, 1000)
-}
-
-const endGame = async (fastify: FastifyInstance, session: GameSessionInterface, io: SocketIOServer, result: string) => {
-    if (session.timer) clearInterval(session.timer);
-
-    const winnerId = result.includes('White') ? session.players[0] : result.includes('Black') ? session.players[1] : null;
-    const eloUpdate = await updateElo(fastify.prisma, session.gameId, winnerId);
-
-    session.status = GameStatus.finished
-
-    io.to(session.gameId).emit('gameOver', {
-        ...getGameState(session),
-        gameOver: true,
-        result,
-        eloUpdate
-    })
-    gameSessions.delete(session.gameId)
-}
-
-const getGameState = (session: GameSessionInterface) => {
-    return {
-        fen: session.chess.fen(),
-        players: session.players,
-        status: session.status,
-        turn: session.chess.turn(),
-        inCheck: session.chess.inCheck(),
-        gameOver: session.chess.isGameOver(),
-        whiteTimeLeft: session.whiteTimeLeft,
-        blackTimeLeft: session.blackTimeLeft
-    };
-}
-
-// Handle all the socket connection after successfully connected
-export const handleSocketConnection = async (socket: Socket, io: SocketIOServer, fastify: FastifyInstance) => {
-    console.log('New client connected:', socket.id);
-
-    // Handle join game with specific Game ID and User ID
-    socket.on('joinGame', async ({ gameId, userId }) => {
-        // Get in-memory sesion
-        let session: GameSessionInterface | null = gameSessions.get(gameId) as GameSessionInterface
-        // Get the game session from database
-        const gameDoc = await GameSession.findOne({ gameId })
-
-        // Check if the game session existed in the database
-        if (!gameDoc) {
-            socket.emit('error', { message: 'Game not found' });
-            return;
-        }
-
-        // If the created game not in the system current session then create new game session
-        if (!session) {
-            session = {
-                gameId,
-                players: [userId],
-                chess: new Chess(),
-                status: gameDoc.status === GameStatus.pending || gameDoc.status === GameStatus.waiting ? GameStatus.waiting : GameStatus.active,
-                whiteTimeLeft: gameDoc.whiteTimeLeft || gameDoc.timeLimit,
-                blackTimeLeft: gameDoc.blackTimeLeft || gameDoc.timeLimit
-            };
-            gameSessions.set(gameId, session);
-        }
-
-        // If the join player not in the system current session 
-        if (session.players.length < 2 && !session.players.includes(userId)) {
-            // Add joined player to the session
-            session.players.push(userId)
-
-            // Check if the joined player belong to black or white
-            if (gameDoc.whitePlayerId && !gameDoc.blackPlayerId) {
-                // In case the joined player is belong to black side
+            // Update game result in database - disconnected player loses
+            try {
+                const prisma = new PrismaClient();
+                
+                // Update game status in MongoDB
                 await GameSession.updateOne(
                     { gameId },
-                    { $set: { blackPlayerId: userId, status: GameStatus.active } }
-                )
-                session.status = GameStatus.active;
-            } else if (gameDoc.blackPlayerId && !gameDoc.whitePlayerId) {
-                // In case the joined player is belong to white side
-                await GameSession.updateOne(
-                    { gameId },
-                    { $set: { whitePlayerId: userId, status: GameStatus.active } }
-                )
-                session.status = GameStatus.active;
-            } else if (!gameDoc.whitePlayerId && !gameDoc.blackPlayerId) {
-                // Edge case: No players assigned yet (shouldn't happen), default to Black for second player
-                await GameSession.updateOne(
-                    { gameId },
-                    { $set: { blackPlayerId: userId, status: GameStatus.active } }
-                )
-                session.status = GameStatus.active
-            }
-        } else if (!session.players.includes(userId)) {
-            // The game session is already full
-            socket.emit('error', { message: 'Game full' });
-            return;
-        }
+                    {
+                        $set: {
+                            finalFen: session.gameState,
+                            endTime: new Date(),
+                            result: disconnectedPlayerId === session.whitePlayerId ? GameResult.blackWins : GameResult.whiteWins,
+                            status: GameStatus.finished
+                        }
+                    }
+                );
 
-        // Store info for reconnect
-        socket.data = { gameId, userId }
-        // Send the user to the room
-        socket.join(gameId);
-        if (session.status === GameStatus.active) startTimer(session, io, fastify);
-        // Send game state to the room => both players can receive
-        io.to(gameId).emit('gameState', {
-            ...getGameState(session),
-            moves: gameDoc.moves,
-            playMode: gameDoc.playMode,
-            timeLimit: gameDoc.timeLimit
-        });
-    })
+                // Update game status in NeonDB
+                await prisma.games.update({
+                    where: { id: gameId },
+                    data: { status: 'completed' }
+                });
 
-    // Handle move from client side
-    socket.on('move', async ({ gameId, move }) => {
-        // Get game session
-        const session: GameSessionInterface = gameSessions.get(gameId) as GameSessionInterface;
-        if (!session || session.status !== GameStatus.active) return;
-
-        try {
-            // Let user make a move
-            session.chess.move(move);
-            const moveNumber = session.chess.history().length;
-            await saveMove(gameId, move, moveNumber);
-
-            // Update game state to players in the current game
-            const gameState = {
-                ...getGameState(session),
-                moveNumber,
-                move
-            };
-            io.to(gameId).emit('gameState', gameState)
-
-            // If the game is over after a move
-            if (session.chess.isGameOver()) {
-                if (session.timer) clearInterval(session.timer);
-                session.status = GameStatus.finished;
-                await saveGameResult(fastify.prisma, gameId, session.chess);
-                gameSessions.delete(gameId)
-            } else {
-                // Game continue
-                startTimer(session, io, fastify);
-            }
-        } catch (error) {
-            socket.emit('invalidMove', { error: 'Invalid Move' })
-        }
-    })
-
-    // Handle rejoin game
-    socket.on('rejoinGame', ({ gameId, userId }) => {
-        const session: GameSessionInterface = gameSessions.get(gameId) as GameSessionInterface;
-        if (session && session.players.includes(userId)) {
-            socket.data = { gameId, userId }
-            socket.join(gameId)
-
-            if (session.status === "pause" && session.players.length === 2) {
-                session.status = GameStatus.active
-                startTimer(session, io, fastify)
-                io.to(gameId).emit('gameResumed', { message: 'Opponent reconnected' })
-            }
-            io.to(gameId).emit('gameState', getGameState(session));
-        }
-    })
-
-    socket.on('disconnect', () => {
-        fastify.log.info(`Client disconnected: ${socket.id}`);
-        const gameId = socket.data?.gameId;
-        const userId = socket.data?.userId;
-
-        if (!gameId || !userId) return;
-
-        const session: GameSessionInterface = gameSessions.get(gameId) as GameSessionInterface
-
-        if (session && session.players.includes(userId)) {
-            if (session.timer) clearInterval(session.timer);
-
-            session.status = GameStatus.paused
-            io.to(gameId).emit('opponentDisconnected', { message: 'Waiting for reconnect (30s)' })
-
-            setTimeout(async () => {
-                if (session.status === GameStatus.paused) {
-                    await endGame(fastify, session, io, `${userId === session.players[0] ? 'Black' : 'White'} wins by disconnect`)
+                // Update ELO ratings - disconnected player loses
+                if (disconnectedPlayerId && remainingPlayerId) {
+                    await gameService.updateElo(prisma, gameId, remainingPlayerId);
                 }
-            }, 3000);
+
+                await prisma.$disconnect();
+            } catch (error) {
+                console.error("Error updating game after disconnect:", error);
+            }
+
+            // Remove the game session
+            delete gameService.gameSessions[gameId];
+            console.log(`Game session ${gameId} ended due to player disconnect`);
+            break;
         }
-    })
+    }
+}
+
+export const findMatch = async (socket: Socket, io: SocketIOServer, playerData: { userId: string }) => {
+    try {
+        // Validate userId first
+        if (!playerData || !playerData.userId) {
+            io.to(socket.id).emit('error', { message: 'Invalid user ID provided' });
+            return;
+        }
+
+        // Get the latest ELO from the database instead of using the passed value
+        const prisma = new PrismaClient();
+        const user = await prisma.users.findUnique({
+            where: {
+                id: playerData.userId // Now we ensure userId exists
+            }
+        });
+
+        if (user) {
+            console.log("User found in database", user.id, user.elo);
+        }
+
+        if (!user) {
+            io.to(socket.id).emit('error', { message: 'User not found' });
+            return;
+        }
+
+        // Use the ELO from the database
+        const userElo = user.elo;
+
+        // First check if this player is already in the waiting list
+        const existingPlayerIndex = waitingPlayers.findIndex(player =>
+            player.socket.id === socket.id || player.userId === playerData.userId
+        );
+
+        if (existingPlayerIndex !== -1) {
+            io.to(socket.id).emit('alreadyWaiting');
+            console.log("Player already in waiting list", socket.id, playerData.userId);
+            return;
+        }
+
+        // Add the new player to waiting list with userId and database ELO
+        waitingPlayers.push({
+            socket,
+            elo: userElo, // Use ELO from database
+            userId: playerData.userId
+        });
+
+        io.to(socket.id).emit('waitingForOpponent');
+        console.log("Player added to waiting list", socket.id, "User ID:", playerData.userId, "ELO:", userElo);
+
+        // Immediately try to find a match
+        checkWaitingPlayersForMatches(io, prisma);
+
+        // Disconnect Prisma client
+        await prisma.$disconnect();
+    } catch (error) {
+        console.error("Error in joinGame:", error);
+        io.to(socket.id).emit('error', { message: 'Failed to join game' });
+    }
 }

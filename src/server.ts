@@ -3,12 +3,15 @@ import Fastify, { FastifyInstance } from 'fastify';
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import * as GameController from "./controllers/game.controller"
 import * as GameService from "./services/game.service";
+import * as SocketService from "./services/socket.service";
+
+
 import fastifyCors from '@fastify/cors';
 import neonPlugin from './plugins/neon';
 import mongodbPlugin from './plugins/mongodb';
-import websocketPlugin from './plugins/websocket';
+// import websocketPlugin from './plugins/websocket';
 import prismaPlugin from './plugins/prisma';
-import gameRoutes from './routes/game.routes';
+// import gameRoutes from './routes/game.routes';
 
 // const server = Fastify({
 //     logger: true // Optional: Enable Fastify logger for debugging
@@ -19,13 +22,13 @@ const server: FastifyInstance = Fastify({ logger: true });
 
 server.register(mongodbPlugin)
 server.register(neonPlugin)
-server.register(websocketPlugin)
+// server.register(websocketPlugin) 
 // server.register(prismaPlugin)
-server.register(gameRoutes)
+// server.register(gameRoutes)
 
 server.register(fastifyCors, {
     origin: "http://localhost:3000", // Allow requests from your React frontend origin
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],         // Allowed HTTP methods
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
     credentials: true,
 })
 
@@ -68,20 +71,19 @@ server.ready(() => {
     // Set up matching check
     const matchmakingInterval = setInterval(() => {
         if (io) {
-            GameService.checkWaitingPlayersForMatches(io);
+            SocketService.checkWaitingPlayersForMatches(io);
         }
     }, 1000);
 
     io.on('connection', (socket: Socket) => {
         server.log.info(`Socket connected: ${socket.id}`);
 
-        socket.on('joinGame', (data: { elo: number }) => {
-            server.log.info(`\nPlayer ${socket.id} requesting to join game with data: ${JSON.stringify(data)}`);
-            const playerElo = data.elo || 1200;
-            // Update to pass an object with userId and elo properties
-            GameController.handleJoinGame(socket, io, { 
-                userId: socket.id, // Use socket.id as userId for now
-                elo: playerElo 
+        socket.on('joinGame', (data: { userId: string }) => {
+            server.log.info(`\nPlayer ${socket.id} requesting to join game with userId: ${data.userId}`);
+            GameController.handlefindMatch(socket, io, { 
+                userId: data.userId,
+             
+                
             });
         });
 
