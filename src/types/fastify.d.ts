@@ -1,16 +1,7 @@
-import { PrismaClient } from '@prisma/client';
-import { MongoClient } from 'mongodb';
-import { Pool } from 'pg';
+// src/types/fastify.d.ts
+import 'fastify';
 
 declare module 'fastify' {
-  interface FastifyInstance {
-    prisma: PrismaClient;
-    mongo: {
-      client: MongoClient;
-      db: ReturnType<MongoClient['db']>;
-    };
-    neon: Pool;
-  }
   interface FastifyRequest {
     user?: {
       id: string;

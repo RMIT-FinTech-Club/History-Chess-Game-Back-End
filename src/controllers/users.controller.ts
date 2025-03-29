@@ -11,8 +11,8 @@ class UsersController {
   async register(request: FastifyRequest<{ Body: { username: string; password: string; email: string } }>, reply: FastifyReply) {
     const { username, password, email } = request.body;
     try {
-      const user = await this.usersService.register(username, password, email);
-      reply.code(201).send(user);
+      const result = await this.usersService.register(username, password, email);
+      reply.code(201).send(result);
     } catch (error: any) {
       reply.code(400).send({ message: error.message });
     }
@@ -44,6 +44,26 @@ class UsersController {
       reply.send({ message: `Profile for ${username}`, user });
     } catch (error: any) {
       reply.code(404).send({ message: error.message });
+    }
+  }
+
+  async requestPasswordReset(request: FastifyRequest<{ Body: { email: string } }>, reply: FastifyReply) {
+    const { email } = request.body;
+    try {
+      const resetCode = await this.usersService.requestPasswordReset(email);
+      reply.send({ message: 'Verification code sent to your email (check console for testing)', resetCode }); // Remove resetCode in production
+    } catch (error: any) {
+      reply.code(400).send({ message: error.message });
+    }
+  }
+
+  async resetPassword(request: FastifyRequest<{ Body: { email: string; resetCode: string; newPassword: string } }>, reply: FastifyReply) {
+    const { email, resetCode, newPassword } = request.body;
+    try {
+      const { token } = await this.usersService.resetPassword(email, resetCode, newPassword);
+      reply.send({ message: 'Password reset successfully', token });
+    } catch (error: any) {
+      reply.code(400).send({ message: error.message });
     }
   }
 }

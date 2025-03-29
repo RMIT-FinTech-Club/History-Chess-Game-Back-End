@@ -1,4 +1,4 @@
-\import fastifyPlugin from 'fastify-plugin';
+import fastifyPlugin from 'fastify-plugin';
 import { FastifyInstance } from 'fastify';
 import { Pool } from 'pg';
 import { dbConfig } from '../configs/db';

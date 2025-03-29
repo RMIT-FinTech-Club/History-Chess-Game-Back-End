@@ -4,9 +4,9 @@ import { MongoClient } from 'mongodb';
 import { dbConfig } from '../configs/db';
 
 async function mongoPlugin(fastify: FastifyInstance) {
-  const client = new MongoClient(dbConfig.mongo.url);
+  const client = new MongoClient(dbConfig.mongodb.url);
   await client.connect();
-  const db = client.db(dbConfig.mongo.dbName);
+  const db = client.db('ftc_history_chess_game');
 
   fastify.decorate('mongo', { client, db });
   fastify.log.info('MongoDB connected successfully');

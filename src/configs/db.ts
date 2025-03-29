@@ -2,17 +2,8 @@ import * as dotenv from 'dotenv';
 
 dotenv.config();
 
-export interface DBConfig {
-  neon: { url: string };
-  mongo: { url: string; dbName: string };
-}
-
-export const dbConfig: DBConfig = {
+export const dbConfig = {
   neon: {
-    url: process.env.NEON_URL || 'postgresql://user:password@localhost:5432/history_chess',
-  },
-  mongo: {
-    url: process.env.MONGODB_URL || 'mongodb://localhost:27017/',
-    dbName: process.env.MONGODB_DB || 'ftc_history_chess_game',
+    url: process.env.NEON_URL || 'postgresql://neondb_owner:npg_eQYSf2pm3NjI@ep-dry-pine-a1k710k2-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require',
   },
 };

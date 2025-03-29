@@ -1,6 +1,16 @@
 import { FastifyRequest, FastifyReply, preHandlerHookHandler } from 'fastify';
 import UsersService from '../services/users.service';
 
+// Extend Fastify's request type directly here
+declare module 'fastify' {
+  interface FastifyRequest {
+    user?: {
+      id: string;
+      username: string;
+    };
+  }
+}
+
 export const authMiddleware: preHandlerHookHandler = async (request: FastifyRequest, reply: FastifyReply) => {
   const usersService = new UsersService(request.server);
 
