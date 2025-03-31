@@ -21,7 +21,7 @@ interface ResetCodeEntry {
 class UsersService {
   private jwtSecret: string;
   private transporter: nodemailer.Transporter;
-  private resetCodes: Map<string, ResetCodeEntry>; // In-memory store: email -> {code, expires}
+  private resetCodes: Map<string, ResetCodeEntry>;
 
   constructor(fastify: FastifyInstance) {
     this.jwtSecret = process.env.JWT_SECRET || 'your-secret-key';
@@ -123,14 +123,13 @@ class UsersService {
     const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
     const resetCodeExpires = Date.now() + 15 * 60 * 1000; // 15 minutes
 
-    // Store in memory
     this.resetCodes.set(email, { code: resetCode, expires: resetCodeExpires });
 
     const mailOptions = {
       from: process.env.EMAIL_USER || 'your-email@gmail.com',
       to: email,
       subject: 'Password Reset Verification Code',
-      text: `Your verification code is: ${resetCode}. It expires in 15 minutes. RESET NAGY BÂY GIỜ HOẶC ANH TÂN SẼ KICK OK?`,
+      text: `Your verification code is: ${resetCode}. It expires in 15 minutes.`,
     };
 
     try {
@@ -150,13 +149,19 @@ class UsersService {
     if (!storedReset || storedReset.code !== resetCode) throw new Error('Invalid verification code');
     if (Date.now() > storedReset.expires) throw new Error('Verification code expired');
 
+    // Validate the new password
+    this.validatePassword(newPassword);
+
+    // Check if new password matches current password
+    const isSamePassword = await bcrypt.compare(newPassword, user.hashedPassword);
+    if (isSamePassword) throw new Error('New password cannot be the same as the current password');
+
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     await postgresPrisma.users.update({
       where: { email },
       data: { hashedPassword },
     });
 
-    // Clear the reset code after use
     this.resetCodes.delete(email);
 
     const newToken = this.generateToken(user.id, user.username);

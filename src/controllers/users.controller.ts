@@ -50,8 +50,8 @@ class UsersController {
   async requestPasswordReset(request: FastifyRequest<{ Body: { email: string } }>, reply: FastifyReply) {
     const { email } = request.body;
     try {
-      const resetCode = await this.usersService.requestPasswordReset(email);
-      reply.send({ message: 'Verification code sent to your email (check console for testing)', resetCode }); // Remove resetCode in production
+      await this.usersService.requestPasswordReset(email);
+      reply.send({ message: 'Verification code sent to your email (check console for testing)' });
     } catch (error: any) {
       reply.code(400).send({ message: error.message });
     }
@@ -63,7 +63,7 @@ class UsersController {
       const { token } = await this.usersService.resetPassword(email, resetCode, newPassword);
       reply.send({ message: 'Password reset successfully', token });
     } catch (error: any) {
-      reply.code(400).send({ message: error.message });
+      reply.code(400).send({ message: error.message }); // Ensure 400 for all errors
     }
   }
 }
