@@ -9,9 +9,9 @@ import * as SocketService from "./services/socket.service";
 import fastifyCors from '@fastify/cors';
 import neonPlugin from './plugins/neon';
 import mongodbPlugin from './plugins/mongodb';
-// import websocketPlugin from './plugins/websocket';
+import websocketPlugin from './plugins/websocket';
 import prismaPlugin from './plugins/prisma';
-// import gameRoutes from './routes/game.routes';
+import gameRoutes from './routes/game.routes';
 
 // const server = Fastify({
 //     logger: true // Optional: Enable Fastify logger for debugging
@@ -19,15 +19,19 @@ import prismaPlugin from './plugins/prisma';
 
 const server: FastifyInstance = Fastify({ logger: true });
 
-
+// Register plugins
 server.register(mongodbPlugin)
 server.register(neonPlugin)
-// server.register(websocketPlugin) 
-// server.register(prismaPlugin)
+server.register(websocketPlugin) 
+server.register(prismaPlugin)
+
+// Register game routes with the correct prefix
+server.register(gameRoutes, { prefix: '/game' })
 // server.register(gameRoutes)
 
+
 server.register(fastifyCors, {
-    origin: "http://localhost:3000", // Allow requests from your React frontend origin
+    origin: "http://localhost:3000",
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
     credentials: true,
 })
@@ -60,46 +64,49 @@ let io: SocketIOServer; // Explicitly type 'io' as SocketIOServer
 //     });
 // });
 
-server.ready(() => {
-    io = new SocketIOServer(server.server, {
-        cors: {
-            origin: "http://localhost:3000",
-            methods: ["GET", "POST", "PUT", "DELETE"]
-        }
-    });
+// server.ready(() => {
+//     io = new SocketIOServer(server.server, {
+//         cors: {
+//             origin: "http://localhost:3000",
+//             methods: ["GET", "POST", "PUT", "DELETE"]
+//         }
+//     });
 
-    // Set up matching check
-    const matchmakingInterval = setInterval(() => {
-        if (io) {
-            SocketService.checkWaitingPlayersForMatches(io);
-        }
-    }, 1000);
+//     // Make socket.io instance available to routes
+//     server.decorate('io', io);
 
-    io.on('connection', (socket: Socket) => {
-        server.log.info(`Socket connected: ${socket.id}`);
+//     const matchmakingInterval = setInterval(() => {
+//         if (io) {
+//             SocketService.checkWaitingPlayersForMatches(io);
+//         }
+//     }, 1000);
 
-        socket.on('joinGame', (data: { userId: string }) => {
-            server.log.info(`\nPlayer ${socket.id} requesting to join game with userId: ${data.userId}`);
-            GameController.handlefindMatch(socket, io, { 
-                userId: data.userId,
+//     io.on('connection', (socket: Socket) => {
+//         server.log.info(`Socket connected: ${socket.id}`);
+
+//         // socket.on('joinGame', (data: { userId: string }) => {
+//         //     server.log.info(`\nPlayer ${socket.id} requesting to join game with userId: ${data.userId}`);
+//         //     GameController.handlefindMatch(socket, io, { 
+//         //         userId: data.userId,
              
                 
-            });
-        });
-
-        socket.on('disconnect', (reason: string) => {
-            server.log.info(`Socket disconnected: ${socket.id} due to ${reason}`);
-            GameController.handleDisconnect(socket, reason);
-        });
-
-        socket.emit('welcomeMessage', 'Welcome to the Chess Game Realtime Server!');
+//         //     });
+//         // });
 
 
-        socket.on('makeMove', (data: { gameId: string, move: string }) => {
-            GameService.handleMove(socket, io, data.gameId, data.move);
-        });
-    });
-});
+//         socket.on('disconnect', (reason: string) => {
+//             server.log.info(`Socket disconnected: ${socket.id} due to ${reason}`);
+//             SocketService.handleDisconnect(socket, reason);
+//         });
+
+//         socket.emit('welcomeMessage', 'Welcome to the Chess Game Realtime Server!');
+
+
+//         socket.on('makeMove', (data: { gameId: string, move: string }) => {
+//             GameService.handleMove(socket, io, data.gameId, data.move);
+//         });
+//     });
+// });
 
 server.get('/', async (request, reply) => {
     return { hello: 'world from Fastify + Manual Socket.IO (TypeScript ESM)!' };
