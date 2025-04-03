@@ -17,8 +17,8 @@ const waitingPlayers: WaitingPlayer[] = [];
 export const checkWaitingPlayersForMatches = (
   io: SocketIOServer,
   prisma?: PrismaClient
-) => {
-  if (waitingPlayers.length < 2) return;
+): string | null => {
+  if (waitingPlayers.length < 2) return null;
 
   for (let i = 0; i < waitingPlayers.length; i++) {
     const player = waitingPlayers[i];
@@ -89,10 +89,12 @@ export const checkWaitingPlayersForMatches = (
         );
 
         i--;
-        break;
+        return gameId; // Return the gameId when a match is found
       }
     }
   }
+
+  return null; // Return undefined if no match is found
 };
 
 export const handleDisconnect = async (socket: Socket, reason: string) => {
@@ -126,11 +128,8 @@ export const handleDisconnect = async (socket: Socket, reason: string) => {
         });
       }
 
-      // Update game result in database - disconnected player loses
       try {
-        const prisma = new PrismaClient();
-
-        // Update game status in MongoDB
+        // Update game status in MongoDB only
         await GameSession.updateOne(
           { gameId },
           {
@@ -146,23 +145,12 @@ export const handleDisconnect = async (socket: Socket, reason: string) => {
           }
         );
 
-        // Update game status in NeonDB
-        await prisma.games.update({
-          where: { id: gameId },
-          data: { status: "completed" },
-        });
-
-        // Update ELO ratings - disconnected player loses
-        if (disconnectedPlayerId && remainingPlayerId) {
-          await gameService.updateElo(prisma, gameId, remainingPlayerId);
-        }
-
-        await prisma.$disconnect();
+        console.log(`Game ${gameId} status updated in MongoDB`);
       } catch (error) {
         console.error("Error updating game after disconnect:", error);
       }
 
-      // Remove the game session
+      // Remove the game session from memory
       delete gameService.gameSessions[gameId];
       console.log(`Game session ${gameId} ended due to player disconnect`);
       break;
@@ -235,11 +223,27 @@ export const findMatch = async (
       userElo
     );
 
-    // Immediately try to find a match
-    checkWaitingPlayersForMatches(io, prisma);
+    // Immediately try to find a match and get the gameId
+    const gameId = await checkWaitingPlayersForMatches(io, prisma);
+    
+    if (!gameId) {
+      console.log("No match found for", socket.id); 
+    }
 
-    // Disconnect Prisma client
+
+    if (gameId) {
+      socket.emit('gameIdAssigned', { 
+        gameId,
+        message: 'Match found and game created'
+      });
+    } else {
+      socket.emit('waitingForMatch', {
+        message: 'Waiting for opponent...'
+      });
+    }
+    
     await prisma.$disconnect();
+    return gameId;
   } catch (error) {
     console.error("Error in joinGame:", error);
     io.to(socket.id).emit("error", { message: "Failed to join game" });
@@ -254,7 +258,7 @@ export const handleSocketConnection = async (
   console.log("New client connected:", socket.id);
 
   // Add this new handler for finding matches
-  socket.on("joinGame", async (data: { userId: string }) => {
+  socket.on("findMatch", async (data: { userId: string }) => {
     await findMatch(socket, io, data);
   });
 
