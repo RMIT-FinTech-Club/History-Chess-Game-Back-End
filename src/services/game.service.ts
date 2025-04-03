@@ -107,67 +107,155 @@ export const findMatch = async (
     playMode: PlayMode,
     colorChoice: 'white' | 'black' | 'random'
 ) => {
+    // First verify that the user exists
+    const user = await prisma.users.findUnique({
+        where: { id: userId }
+    });
+
+    if (!user) {
+        throw new Error(`User with ID ${userId} not found`);
+    }
+
     // Define user's chosen mode
     const timeLimit = playMode === PlayMode.bullet ? 1 : playMode === PlayMode.blitz ? 3 : 10;
 
+    const eloRange = 1000;
+    const minElo = user.elo - eloRange;
+    const maxElo = user.elo + eloRange;
+
     // Try to find a match where the user's color preference can be satisfied
     let match;
+    
+    // First, look for ANY waiting game that matches the criteria regardless of color preference
+    // This ensures players get matched faster
+    match = await GameSession.findOne({
+        status: 'waiting',
+        playMode,
+        timeLimit: timeLimit * 60 * 1000,
+        $or: [
+            { whitePlayerId: null, blackPlayerId: { $ne: userId } },
+            { whitePlayerId: { $ne: userId }, blackPlayerId: null }
+        ]
+    });
+    
+    // If a match is found, assign the player to the appropriate position
+    if (match) {
+        // If white position is open and either player wants random or white
+        if (!match.whitePlayerId && (colorChoice === 'random' || colorChoice === 'white')) {
+            await GameSession.updateOne(
+                { gameId: match.gameId },
+                { 
+                    $set: { 
+                        whitePlayerId: userId, 
+                        whitePlayerElo: user.elo,
+                        status: 'active' 
+                    } 
+                }
+            );
+            return match.gameId;
+        } 
+        // If black position is open and either player wants random or black
+        else if (!match.blackPlayerId && (colorChoice === 'random' || colorChoice === 'black')) {
+            await GameSession.updateOne(
+                { gameId: match.gameId },
+                { 
+                    $set: { 
+                        blackPlayerId: userId, 
+                        blackPlayerElo: user.elo,
+                        status: 'active' 
+                    } 
+                }
+            );
+            return match.gameId;
+        }
+    }
+    
+    // If no match found or color preference couldn't be satisfied, try to find a match
+    // that specifically matches the player's color preference
     if (colorChoice === 'white') {
-        // User wants to be White, find a game with no White player
         match = await GameSession.findOne({
             status: 'waiting',
             playMode,
             timeLimit: timeLimit * 60 * 1000,
             whitePlayerId: null,
-            blackPlayerId: { $ne: userId }
+            blackPlayerId: { $ne: userId },
+            'blackPlayerElo': { $gte: minElo, $lte: maxElo }
         });
-        // If the match is found
         if (match) {
             await GameSession.updateOne(
                 { gameId: match.gameId },
-                { $set: { whitePlayerId: userId, status: 'active' } }
+                { 
+                    $set: { 
+                        whitePlayerId: userId, 
+                        whitePlayerElo: user.elo,
+                        status: 'active' 
+                    } 
+                }
             );
             return match.gameId;
         }
     } else if (colorChoice === 'black') {
-        // User wants to be Black, find a game with no Black player
         match = await GameSession.findOne({
             status: 'waiting',
             playMode,
             timeLimit: timeLimit * 60 * 1000,
-            whitePlayerId: { $ne: userId }, // Find the game where blackPlayer is still null and whitePlayer is not current player
-            blackPlayerId: null
+            whitePlayerId: { $ne: userId },
+            blackPlayerId: null,
+            'whitePlayerElo': { $gte: minElo, $lte: maxElo }
         });
-        // If match found
         if (match) {
             await GameSession.updateOne(
                 { gameId: match.gameId },
-                { $set: { blackPlayerId: userId, status: 'active' } }
+                { 
+                    $set: { 
+                        blackPlayerId: userId, 
+                        blackPlayerElo: user.elo,
+                        status: 'active' 
+                    } 
+                }
             );
             return match.gameId;
         }
     } else {
-        // Random: Try either White or Black
         match = await GameSession.findOne({
             status: 'waiting',
             playMode,
             timeLimit: timeLimit * 60 * 1000,
             $or: [
-                { whitePlayerId: null, blackPlayerId: { $ne: userId } },
-                { whitePlayerId: { $ne: userId }, blackPlayerId: null }
+                { 
+                    whitePlayerId: null, 
+                    blackPlayerId: { $ne: userId },
+                    'blackPlayerElo': { $gte: minElo, $lte: maxElo }
+                },
+                { 
+                    whitePlayerId: { $ne: userId }, 
+                    blackPlayerId: null,
+                    'whitePlayerElo': { $gte: minElo, $lte: maxElo }
+                }
             ]
         });
-        // If match found
         if (match) {
             if (!match.whitePlayerId) {
                 await GameSession.updateOne(
                     { gameId: match.gameId },
-                    { $set: { whitePlayerId: userId, status: 'active' } }
+                    { 
+                        $set: { 
+                            whitePlayerId: userId,
+                            whitePlayerElo: user.elo,
+                            status: 'active' 
+                        } 
+                    }
                 );
             } else {
                 await GameSession.updateOne(
                     { gameId: match.gameId },
-                    { $set: { blackPlayerId: userId, status: 'active' } }
+                    { 
+                        $set: { 
+                            blackPlayerId: userId,
+                            blackPlayerElo: user.elo,
+                            status: 'active' 
+                        } 
+                    }
                 );
             }
             return match.gameId;
@@ -176,30 +264,40 @@ export const findMatch = async (
 
     // No match found, create a new game with the user's color preference
     const game = await prisma.games.create({
-        data: { userId }
-    })
+        data: {
+            id: uuidv4(), // Add unique ID
+            userId: userId,
+            status: 'active' // Add default status
+        }
+    });
 
     let whitePlayerId: string | null = null;
     let blackPlayerId: string | null = null;
+    let whitePlayerElo: number | null = null;
+    let blackPlayerElo: number | null = null;
 
     if (colorChoice === 'white') {
         whitePlayerId = userId;
+        whitePlayerElo = user.elo;
     } else if (colorChoice === 'black') {
         blackPlayerId = userId;
+        blackPlayerElo = user.elo;
     } else {
-        // Random: 50/50 chance of White or Black
         if (Math.random() > 0.5) {
             whitePlayerId = userId;
+            whitePlayerElo = user.elo;
         } else {
             blackPlayerId = userId;
+            blackPlayerElo = user.elo;
         }
     }
 
-    // Create New Game Session
     await GameSession.create({
         gameId: game.id,
         whitePlayerId,
         blackPlayerId,
+        whitePlayerElo,
+        blackPlayerElo,
         startTime: new Date(),
         endTime: null,
         result: GameResult.inProgress,

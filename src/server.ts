@@ -18,7 +18,8 @@ server.register(mongodbPlugin)
 server.register(neonPlugin)
 server.register(websocketPlugin)
 server.register(prismaPlugin)
-server.register(gameRoutes)
+// server.register(gameRoutes)
+server.register(gameRoutes, { prefix: '/game' })
 
 server.register(fastifyCors, {
     origin: "http://localhost:3000", // Allow requests from your React frontend origin

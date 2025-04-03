@@ -27,7 +27,8 @@ export const createNewGame = async (req: FastifyRequest, res: FastifyReply) => {
 export const findNewMatch = async (req: FastifyRequest, res: FastifyReply) => {
     const { userId, playMode, colorPreference } = req.body as any;
     const gameId = await findMatch(req.server.prisma, userId, playMode, colorPreference);
-    return res.code(200).send({ gameId });
+    console.log("GAME STARTED")
+    return res.code(200).send({gameId})
 }
 
 // Handle Challenge Other User Request
