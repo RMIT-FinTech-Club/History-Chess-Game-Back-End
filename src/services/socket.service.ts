@@ -46,6 +46,12 @@ const endGame = async (fastify: FastifyInstance, session: GameSessionInterface, 
 
     const winnerId = result.includes('White') ? session.players[0] : result.includes('Black') ? session.players[1] : null;
     const eloUpdate = await updateElo(fastify.prisma, session.gameId, winnerId);
+    
+    // Save the game result to the database
+    await saveGameResult(session.gameId, result);
+    
+    // Log the winner for debugging
+    console.log(`Game ${session.gameId} ended. Result: ${result}. Winner: ${winnerId || 'Draw'}`);
 
     session.status = GameStatus.finished
 
@@ -71,6 +77,82 @@ const getGameState = (session: GameSessionInterface) => {
     };
 }
 
+
+export const handleMove = async (socket: Socket, io: SocketIOServer, fastify: FastifyInstance, gameId: string, move: string, userId: string) => {
+    console.log("Handling move for gameId:", gameId);
+    console.log("Current game sessions:", Array.from(gameSessions.keys()));
+
+    const session = gameSessions.get(gameId);
+    // console.log("Session: ", session);
+    if (!session) {
+      console.log("Game session not found for gameId:", gameId);
+      socket.emit('error', { message: 'Game session not found' });
+      return;
+    }
+
+    // Use the userId passed directly from the client
+    const currentPlayerId = userId;
+    if (!currentPlayerId) {
+      socket.emit('error', { message: 'Player not identified' });
+      return;
+    }
+
+    // Check if it's this player's turn
+    const isWhiteTurn = session.chess.turn() === 'w';
+    const whitePlayerId = session.players[0]; // First player is white
+    const blackPlayerId = session.players[1]; // Second player is black
+    
+    if ((isWhiteTurn && currentPlayerId !== whitePlayerId) || 
+        (!isWhiteTurn && currentPlayerId !== blackPlayerId)) {
+      socket.emit('error', { message: 'Not your turn' });
+      return;
+    }
+
+    try {
+      // Make the move in memory
+      session.chess.move(move);
+
+      // Save the move to the database
+      const moveNumber = session.chess.history().length;
+      await saveMove(gameId, move, moveNumber);
+
+      // Broadcast the move to all players
+      io.to(gameId).emit('gameState', {
+          ...getGameState(session),
+          moveNumber,
+          move
+      });
+
+      // Check if the game is over
+      if (session.chess.isGameOver()) {
+          let result = '';
+          
+          if (session.chess.isCheckmate()) {
+              result = session.chess.turn() === 'w' ? 'Black wins by checkmate' : 'White wins by checkmate';
+          } else if (session.chess.isDraw()) {
+              if (session.chess.isStalemate()) {
+                  result = 'Draw by stalemate';
+              } else if (session.chess.isThreefoldRepetition()) {
+                  result = 'Draw by repetition';
+              } else if (session.chess.isInsufficientMaterial()) {
+                  result = 'Draw by insufficient material';
+              } else {
+                  result = 'Draw';
+              }
+          }
+          
+          await endGame(fastify, session, io, result);
+      } else {
+          // Game continues
+          startTimer(session, io, fastify);
+      }
+    }
+    catch (error) {
+      console.error("Error handling move:", error);
+      socket.emit('error', { message: 'Invalid move' });
+    }
+}
+
 // Handle all the socket connection after successfully connected
 export const handleSocketConnection = async (socket: Socket, io: SocketIOServer, fastify: FastifyInstance) => {
     console.log('New client connected:', socket.id);
@@ -79,17 +161,22 @@ export const handleSocketConnection = async (socket: Socket, io: SocketIOServer,
     socket.on('joinGame', async ({ gameId, userId }) => {
         // Get in-memory sesion
         let session: GameSessionInterface | null = gameSessions.get(gameId) as GameSessionInterface
+        console.log("Joining game with ID:", gameId);
+        console.log("Current game sessions before join:", Array.from(gameSessions.keys()));
+        
         // Get the game session from database
         const gameDoc = await GameSession.findOne({ gameId })
 
         // Check if the game session existed in the database
         if (!gameDoc) {
+            console.log("Game not found in database:", gameId);
             socket.emit('error', { message: 'Game not found' });
             return;
         }
 
         // If the created game not in the system current session then create new game session
         if (!session) {
+            console.log("Creating new game session for:", gameId);
             session = {
                 gameId,
                 players: [userId],
@@ -99,8 +186,9 @@ export const handleSocketConnection = async (socket: Socket, io: SocketIOServer,
                 blackTimeLeft: gameDoc.blackTimeLeft || gameDoc.timeLimit
             };
             gameSessions.set(gameId, session);
+            console.log("Game sessions after adding new session:", Array.from(gameSessions.keys()));
         }
-
+    
         // If the join player not in the system current session 
         if (session.players.length < 2 && !session.players.includes(userId)) {
             // Add joined player to the session
@@ -147,41 +235,15 @@ export const handleSocketConnection = async (socket: Socket, io: SocketIOServer,
             playMode: gameDoc.playMode,
             timeLimit: gameDoc.timeLimit
         });
+
+
+        // console.log('Join game:', gameId, userId)
+
     })
 
     // Handle move from client side
-    socket.on('move', async ({ gameId, move }) => {
-        // Get game session
-        const session: GameSessionInterface = gameSessions.get(gameId) as GameSessionInterface;
-        if (!session || session.status !== GameStatus.active) return;
-
-        try {
-            // Let user make a move
-            session.chess.move(move);
-            const moveNumber = session.chess.history().length;
-            await saveMove(gameId, move, moveNumber);
-
-            // Update game state to players in the current game
-            const gameState = {
-                ...getGameState(session),
-                moveNumber,
-                move
-            };
-            io.to(gameId).emit('gameState', gameState)
-
-            // If the game is over after a move
-            if (session.chess.isGameOver()) {
-                if (session.timer) clearInterval(session.timer);
-                session.status = GameStatus.finished;
-                await saveGameResult(fastify.prisma, gameId, session.chess);
-                gameSessions.delete(gameId)
-            } else {
-                // Game continue
-                startTimer(session, io, fastify);
-            }
-        } catch (error) {
-            socket.emit('invalidMove', { error: 'Invalid Move' })
-        }
+    socket.on('move', async ({ gameId, move, userId }) => {
+        await handleMove(socket, io, fastify, gameId, move, userId);
     })
 
     // Handle rejoin game

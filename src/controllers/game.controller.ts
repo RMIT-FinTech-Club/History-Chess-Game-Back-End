@@ -3,9 +3,9 @@ import * as GameServices from '../services/game.service';
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { createGame, findMatch } from '../services/game.service';
 
-export const handleJoinGame = (socket: Socket, io: SocketIOServer, playerElo: number): void => {
-    GameServices.joinGame(socket, io, playerElo);
-}
+// export const handleJoinGame = (socket: Socket, io: SocketIOServer, playerElo: number): void => {
+//     GameServices.joinGame(socket, io, playerElo);
+// }
 
 export const handleDisconnect = (socket: Socket, reason: string): void => {
     GameServices.handleDisconnect(socket, reason);
@@ -26,8 +26,12 @@ export const createNewGame = async (req: FastifyRequest, res: FastifyReply) => {
 // Handle Find Match Request
 export const findNewMatch = async (req: FastifyRequest, res: FastifyReply) => {
     const { userId, playMode, colorPreference } = req.body as any;
+
+
     const gameId = await findMatch(req.server.prisma, userId, playMode, colorPreference);
-    console.log("GAME STARTED")
+
+
+    console.log("\n GAME STARTED\n")
     return res.code(200).send({gameId})
 }
 

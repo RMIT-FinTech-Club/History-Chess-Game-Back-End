@@ -68,36 +68,31 @@ export const saveMove = async (gameId: string, move: string, moveNumber: number)
 }
 
 // Update game ressult
-export const saveGameResult = async (prisma: PrismaClient, gameId: string, chess: Chess) => {
+export const saveGameResult = async (gameId: string, resultString: string) => {
     let result: GameResult = GameResult.inProgress;
 
-    // Check the game ressult
-    if (chess.isGameOver()) {
-        if (chess.isCheckmate()) {
-            result = chess.turn() === "b" ? GameResult.whiteWins : GameResult.blackWins;
-        } else if (chess.isStalemate() || chess.isDraw()) {
-            result = GameResult.draw;
-        }
+    // Parse the result string to determine the game result
+    if (resultString.includes('White wins by checkmate') || resultString.includes('White wins by time') || resultString.includes('White wins by disconnect')) {
+        result = GameResult.whiteWins;
+    } else if (resultString.includes('Black wins by checkmate') || resultString.includes('Black wins by time') || resultString.includes('Black wins by disconnect')) {
+        result = GameResult.blackWins;
+    } else if (resultString.includes('Draw')) {
+        result = GameResult.draw;
     }
 
-    // Update game result in mongo database
+    console.log(`Saving game result for ${gameId}: ${resultString} (${result})`);
+
+    // Update game result in MongoDB database
     await GameSession.updateOne(
         { gameId },
         {
             $set: {
-                finalFen: chess.fen(),
                 endTime: new Date(),
                 result,
                 status: GameStatus.finished
             }
         }
     );
-
-    // Update game result in neon db
-    await prisma.games.update({
-        where: { id: gameId },
-        data: { status: 'completed' }
-    });
 }
 
 // Find Match function
@@ -437,56 +432,56 @@ export const handleMove = (socket: Socket, io: SocketIOServer, gameId: string, m
 
 
 
-export const joinGame = (socket: Socket, io: SocketIOServer, playerElo: number) => {
-    // First check if this player is already in the waiting list
-    const existingPlayerIndex = waitingPlayers.findIndex(player => player.socket.id === socket.id);
-    if (existingPlayerIndex !== -1) {
-        io.to(socket.id).emit('alreadyWaiting');
-        console.log("Player already in waiting list", socket.id);
-        return;
-    }
+// export const joinGame = (socket: Socket, io: SocketIOServer, playerElo: number) => {
+//     // First check if this player is already in the waiting list
+//     const existingPlayerIndex = waitingPlayers.findIndex(player => player.socket.id === socket.id);
+//     if (existingPlayerIndex !== -1) {
+//         io.to(socket.id).emit('alreadyWaiting');
+//         console.log("Player already in waiting list", socket.id);
+//         return;
+//     }
 
-    // Add the new player to waiting list
-    waitingPlayers.push({ socket, elo: playerElo });
-    io.to(socket.id).emit('waitingForOpponent');
-    console.log("Player added to waiting list", socket.id);
+//     // Add the new player to waiting list
+//     waitingPlayers.push({ socket, elo: playerElo });
+//     io.to(socket.id).emit('waitingForOpponent');
+//     console.log("Player added to waiting list", socket.id);
 
-    // Immediately try to find a match
-    checkWaitingPlayersForMatches(io);
-}
+//     // Immediately try to find a match
+//     checkWaitingPlayersForMatches(io);
+// }
 
-export const checkWaitingPlayersForMatches = (io: SocketIOServer) => {
-    if (waitingPlayers.length < 2) return;
+// export const checkWaitingPlayersForMatches = (io: SocketIOServer) => {
+//     if (waitingPlayers.length < 2) return;
 
-    for (let i = 0; i < waitingPlayers.length; i++) {
-        const player = waitingPlayers[i];
+//     for (let i = 0; i < waitingPlayers.length; i++) {
+//         const player = waitingPlayers[i];
 
-        for (let j = i + 1; j < waitingPlayers.length; j++) {
-            const opponent = waitingPlayers[j];
+//         for (let j = i + 1; j < waitingPlayers.length; j++) {
+//             const opponent = waitingPlayers[j];
 
-            if (Math.abs(player.elo - opponent.elo) <= 1000) {
+//             if (Math.abs(player.elo - opponent.elo) <= 1000) {
 
-                // Remove both players from waiting list 
-                waitingPlayers.splice(j, 1);
-                waitingPlayers.splice(i, 1);
+//                 // Remove both players from waiting list 
+//                 waitingPlayers.splice(j, 1);
+//                 waitingPlayers.splice(i, 1);
 
-                const gameSession = createNewGameSession(player.socket, opponent.socket);
-                const gameId = gameSession.gameId;
+//                 const gameSession = createNewGameSession(player.socket, opponent.socket);
+//                 const gameId = gameSession.gameId;
 
-                player.socket.join(gameId);
-                opponent.socket.join(gameId);
+//                 player.socket.join(gameId);
+//                 opponent.socket.join(gameId);
 
-                io.to(gameId).emit('gameStart', { gameId: gameId, initialGameState: gameSessions[gameId].gameState });
-                io.to(player.socket.id).emit('gameJoined', { gameId: gameId, playerColor: 'white' });
-                io.to(opponent.socket.id).emit('gameJoined', { gameId: gameId, playerColor: 'black' });
-                console.log("Successfully matched players", player.socket.id, "and", opponent.socket.id);
+//                 io.to(gameId).emit('gameStart', { gameId: gameId, initialGameState: gameSessions[gameId].gameState });
+//                 io.to(player.socket.id).emit('gameJoined', { gameId: gameId, playerColor: 'white' });
+//                 io.to(opponent.socket.id).emit('gameJoined', { gameId: gameId, playerColor: 'black' });
+//                 console.log("Successfully matched players", player.socket.id, "and", opponent.socket.id);
 
-                i--;
-                break;
-            }
-        }
-    }
-}
+//                 i--;
+//                 break;
+//             }
+//         }
+//     }
+// }
 
 export const handleDisconnect = (socket: Socket, reason: string) => {
     const index = waitingPlayers.findIndex(player => player.socket.id === socket.id);
