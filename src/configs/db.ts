@@ -11,7 +11,7 @@ export interface DBConfig {
         url: string;
     };
 }
-
+// Config database connection
 export const dbConfig: DBConfig = {
     mongodb: {
         url: process.env.MONGODB_URL || 'mongodb://localhost:27017',

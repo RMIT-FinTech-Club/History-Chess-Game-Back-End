@@ -1,41 +1,33 @@
 import fp from 'fastify-plugin';
 import { FastifyInstance, FastifyPluginAsync } from 'fastify';
-import { MongoClient } from 'mongodb';
+import mongoose, { Mongoose } from 'mongoose';
 import { dbConfig } from '../configs/db';
 
 interface MongoDBPlugin {
-    client: MongoClient;
-    db: ReturnType<MongoClient['db']>;
+    mongoose: Mongoose; // Keep this for type hinting
 }
 
 const mongodbPlugin: FastifyPluginAsync = fp(async (fastify: FastifyInstance) => {
     try {
-        // Connect with MongoDB
-        const client = new MongoClient(dbConfig.mongodb.url, {
+        // Connect with MongoDB using Mongoose
+        await mongoose.connect(dbConfig.mongodb.url, {
             serverSelectionTimeoutMS: 5000,
-            connectTimeoutMS: 10000
+            connectTimeoutMS: 10000,
+            dbName: dbConfig.mongodb.database, // Specify the database name here
         });
 
-        await client.connect();
-        const db = client.db(dbConfig.mongodb.database);
+        // Decorate the Fastify instance with the Mongoose connection
+        fastify.decorate('mongo', mongoose);
 
-        // Test connection
-        await db.command({ ping: 1 });
-
-        // Decorate the pool so that Fastify Instance can use
-        fastify.decorate('mongo', {
-            client,
-            db
-        });
-
+        // Add a hook to close the Mongoose connection on Fastify server close
         fastify.addHook('onClose', async (instance) => {
-            await (instance as FastifyInstance & { mongo: MongoDBPlugin }).mongo.client.close();
+            await (instance as FastifyInstance & { mongo: MongoDBPlugin }).mongo.mongoose.connection.close();
         });
 
-        fastify.log.info('MongoDB connected successfully');
+        fastify.log.info('MongoDB connected successfully with Mongoose');
     } catch (error: any) {
-        fastify.log.error('MongoDB connection failed:', error);
-        throw new Error(`Failed to connect to MongoDB: ${error.message}`);
+        fastify.log.error('MongoDB connection failed with Mongoose:', error);
+        throw new Error(`Failed to connect to MongoDB with Mongoose: ${error.message}`);
     }
 }, {
     name: 'mongodb',
