@@ -507,3 +507,79 @@ export const handleDisconnect = (socket: Socket, reason: string) => {
         }
     }
 }
+
+/**
+ * Retrieve game history for a specific user without loading moves
+ */
+export const retrieveGameSessions = async (
+    userId: string, 
+    options: {
+      limit?: number;
+      skip?: number;
+      status?: GameStatus;
+      playMode?: PlayMode;
+    } = {}
+  ) => {
+    const { limit = 10, skip = 0, status, playMode } = options;
+  
+    // Build query to find games where user was either white or black
+    const query: any = {
+      $or: [
+        { whitePlayerId: userId },
+        { blackPlayerId: userId }
+      ]
+    };
+  
+    // Add optional filters
+    if (status) query.status = status;
+    if (playMode) query.playMode = playMode;
+  
+    // Find games without including moves
+    const gameSessions = await GameSession.find(query)
+      .select('-moves') // Exclude the moves array to reduce payload
+      .sort({ startTime: -1 }) // Most recent games first
+      .skip(skip)
+      .limit(limit);
+  
+    // Get total count for pagination
+    const total = await GameSession.countDocuments(query);
+  
+    // Format the results
+    const games = gameSessions.map(session => {
+      const isWhite = session.whitePlayerId === userId;
+      return {
+        gameId: session.gameId,
+        playedAs: isWhite ? 'white' : 'black',
+        opponentId: isWhite ? session.blackPlayerId : session.whitePlayerId,
+        startTime: session.startTime,
+        endTime: session.endTime,
+        result: session.result,
+        status: session.status,
+        playMode: session.playMode,
+        timeLimit: session.timeLimit,
+        // No moves included
+      };
+    });
+  
+    return {
+      games,
+      pagination: { total, limit, skip }
+    };
+  };
+
+
+  /**
+ * Retrieve moves for a specific game when user clicks on a game in history
+ */
+export const retrieveGameMoves = async (gameId: string) => {
+    const game = await GameSession.findOne({ gameId });
+    
+    if (!game) {
+      throw new Error(`Game with ID ${gameId} not found`);
+    }
+    
+    return {
+      gameId: game.gameId,
+      moves: game.moves
+    };
+  };
