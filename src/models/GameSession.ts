@@ -8,6 +8,7 @@ export interface IGameSession {
     startTime: Date;
     endTime: Date | null;
     result: GameResult;
+    winner: string | null; 
     status: GameStatus;
     playMode: PlayMode;
     timeLimit: number;
@@ -21,11 +22,15 @@ export interface IGameSession {
 export interface IMove {
     moveNumber: number;
     move: string;
+    color: 'white' | 'black';
+    playerId: string;
 }
 
 const MoveSchema = new Schema<IMove>({
     moveNumber: { type: Number, required: true },
-    move: { type: String, required: true }
+    move: { type: String, required: true },
+    color: { type: String, required: true, enum: ['white', 'black'] },
+    playerId: { type: String, required: true },
 });
 
 const GameSessionSchema = new Schema<IGameSession>({
@@ -35,6 +40,7 @@ const GameSessionSchema = new Schema<IGameSession>({
     startTime: { type: Date, required: true, default: Date.now },
     endTime: { type: Date, default: null },
     result: { type: String, default: '*', enum: ['*', '1-0', '0-1', '1/2-1/2'] },
+    winner: { type: String, default: null }, 
     status: { type: String, required: true, enum: ['waiting', 'pending', 'active', 'finished'], default: 'waiting' },
     playMode: { type: String, required: true, enum: ['bullet', 'blitz', 'rapid'] },
     timeLimit: { type: Number, required: true }, // in milliseconds
