@@ -54,7 +54,7 @@ class UsersService {
     }
     return trimmed.toLowerCase(); // Canonicalize to lowercase
   }
-
+  // Validation process for the email
   private validateEmail(email: string): string {
     if (!email || typeof email !== 'string') {
       this.logger.warn(`Invalid email type: ${typeof email}`);
