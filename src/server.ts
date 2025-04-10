@@ -1,25 +1,38 @@
 import Fastify, { FastifyInstance } from 'fastify';
+import fastifyCors from '@fastify/cors';
 import neonPlugin from './plugins/neon';
 import mongodbPlugin from './plugins/mongodb';
+import prismaPlugin from './plugins/prisma';
+import leaderboardRoutes from './routes/leaderboard.routes';
 
-const fastify: FastifyInstance = Fastify({ logger: true });
+const server = Fastify({
+    logger: true // Optional: Enable Fastify logger for debugging
+});
 
-fastify.register(mongodbPlugin)
-fastify.register(neonPlugin)
+server.register(mongodbPlugin)
+server.register(neonPlugin)
+server.register(prismaPlugin)
+server.register(leaderboardRoutes, { prefix: '/api' });
 
-fastify.get('/', async (request, reply) => {
-    return { hello: 'world' };
+server.register(fastifyCors, {
+    origin: "http://localhost:3000", // Allow requests from your React frontend origin
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],         // Allowed HTTP methods
+    credentials: true,
+})
+
+server.get('/', async (request, reply) => {
+    return { hello: 'world from Fastify + Manual Socket.IO (TypeScript ESM)!' };
 });
 
 // Check connection with MongoDB and Neon check route
-fastify.get('/health', async (request, reply) => {
+server.get('/health', async (request, reply) => {
     try {
         // Test MongoDB connection
-        await fastify.mongo.db.command({ ping: 2 });
-
+        // await server.mongo.connect.command({ ping: 2 });
+        
         // Test Neon connection
-        await fastify.neon.query('SELECT 1');
-
+        await server.neon.query('SELECT 1');
+        
         return {
             status: 'ok',
             mongodb: 'connected',
@@ -36,10 +49,10 @@ fastify.get('/health', async (request, reply) => {
 
 const start = async () => {
     try {
-        await fastify.listen({ port: 8080 });
-        console.log('Server is running at http://localhost:8080');
+        await server.listen({ port: 8000 });
+        server.log.info(`Server listening on port ${8000}`);
     } catch (err) {
-        fastify.log.error(err);
+        server.log.error(err);
         process.exit(1);
     }
 };
