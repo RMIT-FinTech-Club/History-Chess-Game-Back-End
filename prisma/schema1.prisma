@@ -19,11 +19,12 @@ model users {
   email          String   @unique
   hashedPassword String
   walletAddress  String?  @unique
-  elo            Int      @default(1500)
+  elo            Int      @default(400)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
   ownedNFTs nfts[]
+  games games[]
 }
 
 model nfts {
@@ -33,4 +34,12 @@ model nfts {
   ownerId      String?
   detailedInfo Json
   mintedTime   DateTime @default(now())
+}
+
+model games {
+  id             String   @unique @default(uuid())
+  userId         String
+  user           users    @relation(fields: [userId], references: [id])
+  createdAt      DateTime @default(now())
+  status         String   @default("active")
 }
