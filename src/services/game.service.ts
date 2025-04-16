@@ -4,6 +4,7 @@ import { PrismaClient } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import { GameSession, IGameSession } from '../models/GameSession';
 import { PlayMode, GameResult, GameStatus } from '../types/enum';
+
 interface GameSession {
     gameId: string;
     playerSockets: Socket[];
@@ -511,64 +512,102 @@ export const handleDisconnect = (socket: Socket, reason: string) => {
 /**
  * Retrieve game history for a specific user without loading moves
  */
+const prisma = new PrismaClient();
+export const getUserNameById = async (userId: string): Promise<string | null> => {
+    try {
+        const user = await prisma.users.findUnique({
+            where: { id: userId },
+            select: { username: true } // Assuming the user's name is stored in the `username` field
+        });
+
+        return user ? user.username : null;
+    } catch (error) {
+        console.error(`Error fetching user name for ID ${userId}:`, error);
+        return null; // Return null or handle the error as needed
+    }
+};
+
 export const retrieveGameSessions = async (
-    userId: string, 
+    userId: string,
     options: {
-      limit?: number;
-      skip?: number;
-      status?: GameStatus;
-      playMode?: PlayMode;
+        limit?: number;
+        skip?: number;
+        status?: string;
+        playMode?: string;
     } = {}
-  ) => {
+) => {
     const { limit = 10, skip = 0, status, playMode } = options;
-  
-    // Build query to find games where user was either white or black
-    const query: any = {
-      $or: [
-        { whitePlayerId: userId },
-        { blackPlayerId: userId }
-      ]
-    };
-  
-    // Add optional filters
-    if (status) query.status = status;
-    if (playMode) query.playMode = playMode;
-  
-    // Find games without including moves
-    const gameSessions = await GameSession.find(query)
-      .select('-moves') // Exclude the moves array to reduce payload
-      .sort({ startTime: -1 }) // Most recent games first
-      .skip(skip)
-      .limit(limit);
-  
-    // Get total count for pagination
-    const total = await GameSession.countDocuments(query);
-  
-    // Format the results
-    const games = gameSessions.map(session => {
-      const isWhite = session.whitePlayerId === userId;
-      return {
-        gameId: session.gameId,
-        playedAs: isWhite ? 'white' : 'black',
-        opponentId: isWhite ? session.blackPlayerId : session.whitePlayerId,
-        startTime: session.startTime,
-        endTime: session.endTime,
-        result: session.result,
-        status: session.status,
-        playMode: session.playMode,
-        timeLimit: session.timeLimit,
-        // No moves included
-      };
-    });
-  
-    return {
-      games,
-      pagination: { total, limit, skip }
-    };
-  };
 
+    try {
+        // Build query to find games where user was either white or black
+        const query: any = {
+            $or: [
+                { whitePlayerId: userId },
+                { blackPlayerId: userId }
+            ]
+        };
 
-  /**
+        // Add optional filters
+        if (status) query.status = status;
+        if (playMode) query.playMode = playMode;
+
+        // Find games without including moves
+        const gameSessions = await GameSession.find(query)
+            .select('-moves') // Exclude the moves array to reduce payload
+            .sort({ startTime: -1 }) // Most recent games first
+            .skip(skip)
+            .limit(limit);
+
+        // Get total count for pagination
+        const total = await GameSession.countDocuments(query);
+
+        // Format the results
+        const games = await Promise.all(
+            gameSessions.map(async (session) => {
+                const isWhite = session.whitePlayerId === userId;
+                const opponentId = isWhite ? session.blackPlayerId : session.whitePlayerId;
+                const opponentName = opponentId ? await getUserNameById(opponentId) : null;
+
+                let result = "ongoing";
+                if (session.result === "1/2-1/2") {
+                    result = "draw";
+                } else if (
+                    (isWhite && session.result === "1-0") ||
+                    (!isWhite && session.result === "0-1")
+                ) {
+                    result = "Victory";
+                } else if (
+                    (isWhite && session.result === "0-1") ||
+                    (!isWhite && session.result === "1-0")
+                ) {
+                    result = "Defeat";
+                }
+
+                return {
+                    gameId: session.gameId,
+                    playedAs: isWhite ? 'white' : 'black',
+                    opponentId: opponentId,
+                    opponentName: opponentName,
+                    startTime: session.startTime,
+                    endTime: session.endTime,
+                    result: result,
+                    status: session.status,
+                    playMode: session.playMode,
+                    timeLimit: session.timeLimit
+                };
+            })
+        );
+
+        return {
+            games,
+            pagination: { total, limit, skip }
+        };
+    } catch (error) {
+        console.error(`Error retrieving game sessions for user ID ${userId}:`, error);
+        throw new Error("Failed to retrieve game sessions. Please try again later.");
+    }
+};
+/**
  * Retrieve moves for a specific game when user clicks on a game in history
  */
 export const retrieveGameMoves = async (gameId: string) => {
