@@ -1,4 +1,4 @@
-// This controller handles HTTP requests related to users
+// Handle HTTP requests and responses
 
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { userService, CreateUserInput, UpdateUserInput } from '../services/user.service';

@@ -1,3 +1,5 @@
+// Contain business logic and database operations
+
 import { PrismaClient } from '@prisma/client';
 import * as crypto from 'crypto';
 
