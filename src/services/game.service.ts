@@ -527,90 +527,6 @@ export const getUserNameById = async (userId: string): Promise<string | null> =>
     }
 };
 
-// export const retrieveGameSessions = async (
-//     userId: string,
-//     options: {
-//         limit?: number;
-//         skip?: number;
-//         status?: string;
-//         playMode?: string;
-//     } = {}
-// ) => {
-//     const { limit = 10, skip = 0, status, playMode } = options;
-
-//     try {
-//         // Build query to find games where user was either white or black
-//         const query: any = {
-//             $or: [
-//                 { whitePlayerId: userId },
-//                 { blackPlayerId: userId }
-//             ]
-//         };
-
-//         // Add optional filters
-//         if (status) query.status = status;
-//         if (playMode) query.playMode = playMode;
-
-//         // Find games without including moves
-//         const gameSessions = await GameSession.find(query)
-//             .select('-moves') // Exclude the moves array to reduce payload
-//             .sort({ startTime: -1 }) // Most recent games first
-//             .skip(skip)
-//             .limit(limit);
-
-//         // Get total count for pagination
-//         const total = await GameSession.countDocuments(query);
-
-//         // Format the results
-//         const games = await Promise.all(
-//             gameSessions.map(async (session) => {
-//                 const isWhite = session.whitePlayerId === userId;
-//                 const opponentId = isWhite ? session.blackPlayerId : session.whitePlayerId;
-//                 const opponentName = opponentId ? await getUserNameById(opponentId) : null;
-
-//                 let result = "ongoing";
-//                 if (session.result === "1/2-1/2") {
-//                     result = "draw";
-//                 } else if (
-//                     (isWhite && session.result === "1-0") ||
-//                     (!isWhite && session.result === "0-1")
-//                 ) {
-//                     result = "Victory";
-//                 } else if (
-//                     (isWhite && session.result === "0-1") ||
-//                     (!isWhite && session.result === "1-0")
-//                 ) {
-//                     result = "Defeat";
-//                 }
-
-//                 return {
-//                     gameId: session.gameId,
-//                     playedAs: isWhite ? 'white' : 'black',
-//                     opponentId: opponentId,
-//                     opponentName: opponentName,
-//                     startTime: session.startTime,
-//                     endTime: session.endTime,
-//                     result: result,
-//                     status: session.status,
-//                     playMode: session.playMode,
-//                     timeLimit: session.timeLimit
-//                 };
-//             })
-//         );
-
-//         return {
-//             games,
-//             pagination: { total, limit, skip }
-//         };
-//     } catch (error) {
-//         console.error(`Error retrieving game sessions for user ID ${userId}:`, error);
-//         throw new Error("Failed to retrieve game sessions. Please try again later.");
-//     }
-// };
-
-
-
-
 export interface RetrieveOptions {
     limit?: number;
     skip?: number;
@@ -618,132 +534,12 @@ export interface RetrieveOptions {
     playMode?: string;
 }
 
-
 export class ValidationError extends Error {
     constructor(message: string) {
         super(message);
         this.name = 'ValidationError';
     }
 }
-
-// export const retrieveGameSessions = async (
-//     userId: string,
-//     options: RetrieveOptions = {}
-// ): Promise<{
-//     games: Array<{
-//         gameId: string;
-//         playedAs: string | null;
-//         opponentId: string | null;
-//         opponentName: string | null;
-//         startTime: Date | null;
-//         endTime: Date | null;
-//         result: 'Victory' | 'Defeat' | 'Draw' | 'ongoing';
-//         status: string;
-//         playMode: string;
-//         timeLimit: number;
-//     }>;
-//     pagination: { total: number; limit: number; skip: number };
-// }> => {
-//     // === 1) PARAM VALIDATION (throws ValidationError) ===
-//     if (!validator.isUUID(userId, 4)) {
-//         throw new ValidationError('Invalid userId: must be a valid UUID v4');
-//     }
-
-//     const { limit = 10, skip = 0, status, playMode } = options;
-
-//     if (!validator.isInt(String(limit), { min: 1, max: 1000 })) {
-//         throw new ValidationError('Invalid limit: must be an integer between 1 and 1000');
-//     }
-//     if (!validator.isInt(String(skip), { min: 0 })) {
-//         throw new ValidationError('Invalid skip: must be a non-negative integer');
-//     }
-
-//     const allowedStatuses = ['ongoing', 'finished', 'draw'];
-//     if (status != null && !allowedStatuses.includes(status)) {
-//         throw new ValidationError(`Invalid status: must be one of ${allowedStatuses.join(', ')}`);
-//     }
-
-//     const allowedModes = ['blitz', 'rapid', 'classical'];
-//     if (playMode != null && !allowedModes.includes(playMode)) {
-//         throw new ValidationError(`Invalid playMode: must be one of ${allowedModes.join(', ')}`);
-//     }
-
-//     // === 2) DB LOGIC (only this is caught below) ===
-//     try {
-//         const query: any = {
-//             $or: [{ whitePlayerId: userId }, { blackPlayerId: userId }],
-//         };
-//         if (status) query.status = status;
-//         if (playMode) query.playMode = playMode;
-
-//         // Fetch sessions and total count in parallel
-//         const [sessions, total] = await Promise.all([
-//             GameSession.find(query)
-//                 .select('-moves')
-//                 .sort({ startTime: -1 })
-//                 .skip(skip)
-//                 .limit(limit),
-//             GameSession.countDocuments(query),
-//         ]);
-
-//         // Map to your DTO
-//         const games = await Promise.all(
-//             sessions.map(async (session) => {
-//                 const isWhite = session.whitePlayerId === userId;
-//                 const opponentId = isWhite
-//                     ? session.blackPlayerId
-//                     : session.whitePlayerId;
-
-//                 // Fetch opponent name via Prisma
-//                 const opponentName = opponentId
-//                     ? (await prisma.users.findUnique({
-//                         where: { id: opponentId },
-//                         select: { username: true }
-//                     }))?.username ?? null
-//                     : null;
-
-//                 // Compute result
-//                 let result: 'Victory' | 'Defeat' | 'Draw' | 'ongoing' = 'ongoing';
-//                 if (session.result === '1/2-1/2') {
-//                     result = 'Draw';
-//                 } else if (
-//                     (isWhite && session.result === '1-0') ||
-//                     (!isWhite && session.result === '0-1')
-//                 ) {
-//                     result = 'Victory';
-//                 } else if (
-//                     (isWhite && session.result === '0-1') ||
-//                     (!isWhite && session.result === '1-0')
-//                 ) {
-//                     result = 'Defeat';
-//                 }
-
-//                 return {
-//                     gameId: session.gameId,
-//                     playedAs: isWhite ? 'white' : 'black',
-//                     opponentId,
-//                     opponentName,
-//                     startTime: session.startTime,
-//                     endTime: session.endTime,
-//                     result,
-//                     status: session.status,
-//                     playMode: session.playMode,
-//                     timeLimit: session.timeLimit,
-//                 };
-//             })
-//         );
-
-//         return {
-//             games,
-//             pagination: { total, limit, skip },
-//         };
-//     } catch (err) {
-//         // Log the full error for your own debugging
-//         console.error(`Error retrieving game sessions for ${userId}`, err);
-//         // Throw a generic service‐error for unknown failures
-//         throw new Error('Failed to retrieve game sessions. Please try again later.');
-//     }
-// };
 
 export interface GameHistoryItem {
     opponentName: string | null;
@@ -753,7 +549,7 @@ export interface GameHistoryItem {
 }
 
 /**
- * Fetches a user’s recent games & validates inputs at the service level.
+ * Fetch game history.
  */
 export async function retrieveGameSessions(
     userId: string,
