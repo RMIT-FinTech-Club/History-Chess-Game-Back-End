@@ -618,6 +618,7 @@ export interface RetrieveOptions {
     playMode?: string;
 }
 
+
 export class ValidationError extends Error {
     constructor(message: string) {
         super(message);
@@ -625,124 +626,220 @@ export class ValidationError extends Error {
     }
 }
 
-export const retrieveGameSessions = async (
+// export const retrieveGameSessions = async (
+//     userId: string,
+//     options: RetrieveOptions = {}
+// ): Promise<{
+//     games: Array<{
+//         gameId: string;
+//         playedAs: string | null;
+//         opponentId: string | null;
+//         opponentName: string | null;
+//         startTime: Date | null;
+//         endTime: Date | null;
+//         result: 'Victory' | 'Defeat' | 'Draw' | 'ongoing';
+//         status: string;
+//         playMode: string;
+//         timeLimit: number;
+//     }>;
+//     pagination: { total: number; limit: number; skip: number };
+// }> => {
+//     // === 1) PARAM VALIDATION (throws ValidationError) ===
+//     if (!validator.isUUID(userId, 4)) {
+//         throw new ValidationError('Invalid userId: must be a valid UUID v4');
+//     }
+
+//     const { limit = 10, skip = 0, status, playMode } = options;
+
+//     if (!validator.isInt(String(limit), { min: 1, max: 1000 })) {
+//         throw new ValidationError('Invalid limit: must be an integer between 1 and 1000');
+//     }
+//     if (!validator.isInt(String(skip), { min: 0 })) {
+//         throw new ValidationError('Invalid skip: must be a non-negative integer');
+//     }
+
+//     const allowedStatuses = ['ongoing', 'finished', 'draw'];
+//     if (status != null && !allowedStatuses.includes(status)) {
+//         throw new ValidationError(`Invalid status: must be one of ${allowedStatuses.join(', ')}`);
+//     }
+
+//     const allowedModes = ['blitz', 'rapid', 'classical'];
+//     if (playMode != null && !allowedModes.includes(playMode)) {
+//         throw new ValidationError(`Invalid playMode: must be one of ${allowedModes.join(', ')}`);
+//     }
+
+//     // === 2) DB LOGIC (only this is caught below) ===
+//     try {
+//         const query: any = {
+//             $or: [{ whitePlayerId: userId }, { blackPlayerId: userId }],
+//         };
+//         if (status) query.status = status;
+//         if (playMode) query.playMode = playMode;
+
+//         // Fetch sessions and total count in parallel
+//         const [sessions, total] = await Promise.all([
+//             GameSession.find(query)
+//                 .select('-moves')
+//                 .sort({ startTime: -1 })
+//                 .skip(skip)
+//                 .limit(limit),
+//             GameSession.countDocuments(query),
+//         ]);
+
+//         // Map to your DTO
+//         const games = await Promise.all(
+//             sessions.map(async (session) => {
+//                 const isWhite = session.whitePlayerId === userId;
+//                 const opponentId = isWhite
+//                     ? session.blackPlayerId
+//                     : session.whitePlayerId;
+
+//                 // Fetch opponent name via Prisma
+//                 const opponentName = opponentId
+//                     ? (await prisma.users.findUnique({
+//                         where: { id: opponentId },
+//                         select: { username: true }
+//                     }))?.username ?? null
+//                     : null;
+
+//                 // Compute result
+//                 let result: 'Victory' | 'Defeat' | 'Draw' | 'ongoing' = 'ongoing';
+//                 if (session.result === '1/2-1/2') {
+//                     result = 'Draw';
+//                 } else if (
+//                     (isWhite && session.result === '1-0') ||
+//                     (!isWhite && session.result === '0-1')
+//                 ) {
+//                     result = 'Victory';
+//                 } else if (
+//                     (isWhite && session.result === '0-1') ||
+//                     (!isWhite && session.result === '1-0')
+//                 ) {
+//                     result = 'Defeat';
+//                 }
+
+//                 return {
+//                     gameId: session.gameId,
+//                     playedAs: isWhite ? 'white' : 'black',
+//                     opponentId,
+//                     opponentName,
+//                     startTime: session.startTime,
+//                     endTime: session.endTime,
+//                     result,
+//                     status: session.status,
+//                     playMode: session.playMode,
+//                     timeLimit: session.timeLimit,
+//                 };
+//             })
+//         );
+
+//         return {
+//             games,
+//             pagination: { total, limit, skip },
+//         };
+//     } catch (err) {
+//         // Log the full error for your own debugging
+//         console.error(`Error retrieving game sessions for ${userId}`, err);
+//         // Throw a generic service‐error for unknown failures
+//         throw new Error('Failed to retrieve game sessions. Please try again later.');
+//     }
+// };
+
+export interface GameHistoryItem {
+    opponentName: string | null;
+    gameMode: string;
+    totalTime: number;
+    result: 'Victory' | 'Defeat' | 'Draw';
+}
+
+/**
+ * Fetches a user’s recent games & validates inputs at the service level.
+ */
+export async function retrieveGameSessions(
     userId: string,
-    options: RetrieveOptions = {}
-): Promise<{
-    games: Array<{
-        gameId: string;
-        playedAs: string | null;
-        opponentId: string | null;
-        opponentName: string | null;
-        startTime: Date | null;
-        endTime: Date | null;
-        result: 'Victory' | 'Defeat' | 'Draw' | 'ongoing';
-        status: string;
-        playMode: string;
-        timeLimit: number;
-    }>;
-    pagination: { total: number; limit: number; skip: number };
-}> => {
-    // === 1) PARAM VALIDATION (throws ValidationError) ===
+    limit = 10,
+    skip = 0
+): Promise<GameHistoryItem[]> {
+    // ----- 1) Validate parameters -----
     if (!validator.isUUID(userId, 4)) {
         throw new ValidationError('Invalid userId: must be a valid UUID v4');
     }
-
-    const { limit = 10, skip = 0, status, playMode } = options;
-
     if (!validator.isInt(String(limit), { min: 1, max: 1000 })) {
         throw new ValidationError('Invalid limit: must be an integer between 1 and 1000');
     }
     if (!validator.isInt(String(skip), { min: 0 })) {
-        throw new ValidationError('Invalid skip: must be a non-negative integer');
+        throw new ValidationError('Invalid skip: must be a non‑negative integer');
     }
 
-    const allowedStatuses = ['ongoing', 'finished', 'draw'];
-    if (status != null && !allowedStatuses.includes(status)) {
-        throw new ValidationError(`Invalid status: must be one of ${allowedStatuses.join(', ')}`);
-    }
-
-    const allowedModes = ['blitz', 'rapid', 'classical'];
-    if (playMode != null && !allowedModes.includes(playMode)) {
-        throw new ValidationError(`Invalid playMode: must be one of ${allowedModes.join(', ')}`);
-    }
-
-    // === 2) DB LOGIC (only this is caught below) ===
     try {
-        const query: any = {
-            $or: [{ whitePlayerId: userId }, { blackPlayerId: userId }],
-        };
-        if (status) query.status = status;
-        if (playMode) query.playMode = playMode;
+        // ----- 2) Fetch data -----
+        const sessions = await GameSession.find({
+            $or: [{ whitePlayerId: userId }, { blackPlayerId: userId }]
+        })
+            .select('whitePlayerId blackPlayerId startTime endTime result playMode')
+            .sort({ startTime: -1 })
+            .skip(skip)
+            .limit(limit)
+            .lean();
 
-        // Fetch sessions and total count in parallel
-        const [sessions, total] = await Promise.all([
-            GameSession.find(query)
-                .select('-moves')
-                .sort({ startTime: -1 })
-                .skip(skip)
-                .limit(limit),
-            GameSession.countDocuments(query),
-        ]);
+        if (sessions.length === 0) {
+            return [];
+        }
 
-        // Map to your DTO
-        const games = await Promise.all(
-            sessions.map(async (session) => {
-                const isWhite = session.whitePlayerId === userId;
-                const opponentId = isWhite
-                    ? session.blackPlayerId
-                    : session.whitePlayerId;
+        // ----- 3) Batch opponent ID → name lookup -----
+        const opponentIds = Array.from(new Set(
+            sessions
+                .map(s => (s.whitePlayerId === userId ? s.blackPlayerId : s.whitePlayerId))
+                .filter((id): id is string => Boolean(id))
+        ));
 
-                // Fetch opponent name via Prisma
-                const opponentName = opponentId
-                    ? (await prisma.users.findUnique({
-                        where: { id: opponentId },
-                        select: { username: true }
-                    }))?.username ?? null
-                    : null;
+        const users = await prisma.users.findMany({
+            where: { id: { in: opponentIds } },
+            select: { id: true, username: true }
+        });
+        const nameById = new Map(users.map(u => [u.id, u.username]));
 
-                // Compute result
-                let result: 'Victory' | 'Defeat' | 'Draw' | 'ongoing' = 'ongoing';
-                if (session.result === '1/2-1/2') {
-                    result = 'Draw';
-                } else if (
-                    (isWhite && session.result === '1-0') ||
-                    (!isWhite && session.result === '0-1')
-                ) {
-                    result = 'Victory';
-                } else if (
-                    (isWhite && session.result === '0-1') ||
-                    (!isWhite && session.result === '1-0')
-                ) {
-                    result = 'Defeat';
-                }
+        // ----- 4) Map to the slim DTO -----
+        return sessions.map(s => {
+            const iAmWhite = s.whitePlayerId === userId;
+            const oppId = iAmWhite ? s.blackPlayerId : s.whitePlayerId;
+            const oppName = oppId ? nameById.get(oppId) ?? null : null;
 
-                return {
-                    gameId: session.gameId,
-                    playedAs: isWhite ? 'white' : 'black',
-                    opponentId,
-                    opponentName,
-                    startTime: session.startTime,
-                    endTime: session.endTime,
-                    result,
-                    status: session.status,
-                    playMode: session.playMode,
-                    timeLimit: session.timeLimit,
-                };
-            })
-        );
+            // compute total seconds
+            const startMs = new Date(s.startTime!).getTime();
+            const endMs = new Date(s.endTime!).getTime();
+            const totalSec = Math.floor((endMs - startMs) / 1000);
 
-        return {
-            games,
-            pagination: { total, limit, skip },
-        };
-    } catch (err) {
-        // Log the full error for your own debugging
-        console.error(`Error retrieving game sessions for ${userId}`, err);
-        // Throw a generic service‐error for unknown failures
-        throw new Error('Failed to retrieve game sessions. Please try again later.');
+            // derive result from stored session.result
+            let result: GameHistoryItem['result'];
+            if (s.result === '1/2-1/2') {
+                result = 'Draw';
+            } else if (
+                (iAmWhite && s.result === '1-0') ||
+                (!iAmWhite && s.result === '0-1')
+            ) {
+                result = 'Victory';
+            } else {
+                result = 'Defeat';
+            }
+
+            return {
+                opponentName: oppName,
+                gameMode: s.playMode,
+                totalTime: totalSec,
+                result
+            };
+        });
+    } catch (err: any) {
+        // Log the full error for debugging
+        console.error(`Failed to fetch game history for ${userId}`, err);
+        // Convert any non-ValidationError into a generic service error
+        if (err instanceof ValidationError) {
+            throw err;
+        }
+        throw new Error('Internal server error while retrieving game history');
     }
-};
+}
 /**
  * Retrieve moves for a specific game when user clicks on a game in history
  */
@@ -763,7 +860,6 @@ export const retrieveGameMoves = async (gameId: string) => {
         };
     } catch (err: any) {
         if (err instanceof ValidationError) throw err;
-
         console.error(`Error retrieving moves for game ${gameId}:`, err);
         throw new Error('Failed to retrieve game moves. Please try again later.');
     }
