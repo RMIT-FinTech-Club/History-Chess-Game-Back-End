@@ -4,7 +4,7 @@ import { PrismaClient } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import { GameSession, IGameSession } from '../models/GameSession';
 import { PlayMode, GameResult, GameStatus } from '../types/enum';
-
+import validator from 'validator';
 interface GameSession {
     gameId: string;
     playerSockets: Socket[];
@@ -121,7 +121,7 @@ export const findMatch = async (
 
     // Try to find a match where the user's color preference can be satisfied
     let match;
-    
+
     // First, look for ANY waiting game that matches the criteria regardless of color preference
     // This ensures players get matched faster
     match = await GameSession.findOne({
@@ -133,39 +133,39 @@ export const findMatch = async (
             { whitePlayerId: { $ne: userId }, blackPlayerId: null }
         ]
     });
-    
+
     // If a match is found, assign the player to the appropriate position
     if (match) {
         // If white position is open and either player wants random or white
         if (!match.whitePlayerId && (colorChoice === 'random' || colorChoice === 'white')) {
             await GameSession.updateOne(
                 { gameId: match.gameId },
-                { 
-                    $set: { 
-                        whitePlayerId: userId, 
+                {
+                    $set: {
+                        whitePlayerId: userId,
                         whitePlayerElo: user.elo,
-                        status: 'active' 
-                    } 
+                        status: 'active'
+                    }
                 }
             );
             return match.gameId;
-        } 
+        }
         // If black position is open and either player wants random or black
         else if (!match.blackPlayerId && (colorChoice === 'random' || colorChoice === 'black')) {
             await GameSession.updateOne(
                 { gameId: match.gameId },
-                { 
-                    $set: { 
-                        blackPlayerId: userId, 
+                {
+                    $set: {
+                        blackPlayerId: userId,
                         blackPlayerElo: user.elo,
-                        status: 'active' 
-                    } 
+                        status: 'active'
+                    }
                 }
             );
             return match.gameId;
         }
     }
-    
+
     // If no match found or color preference couldn't be satisfied, try to find a match
     // that specifically matches the player's color preference
     if (colorChoice === 'white') {
@@ -180,12 +180,12 @@ export const findMatch = async (
         if (match) {
             await GameSession.updateOne(
                 { gameId: match.gameId },
-                { 
-                    $set: { 
-                        whitePlayerId: userId, 
+                {
+                    $set: {
+                        whitePlayerId: userId,
                         whitePlayerElo: user.elo,
-                        status: 'active' 
-                    } 
+                        status: 'active'
+                    }
                 }
             );
             return match.gameId;
@@ -202,12 +202,12 @@ export const findMatch = async (
         if (match) {
             await GameSession.updateOne(
                 { gameId: match.gameId },
-                { 
-                    $set: { 
-                        blackPlayerId: userId, 
+                {
+                    $set: {
+                        blackPlayerId: userId,
                         blackPlayerElo: user.elo,
-                        status: 'active' 
-                    } 
+                        status: 'active'
+                    }
                 }
             );
             return match.gameId;
@@ -218,13 +218,13 @@ export const findMatch = async (
             playMode,
             timeLimit: timeLimit * 60 * 1000,
             $or: [
-                { 
-                    whitePlayerId: null, 
+                {
+                    whitePlayerId: null,
                     blackPlayerId: { $ne: userId },
                     'blackPlayerElo': { $gte: minElo, $lte: maxElo }
                 },
-                { 
-                    whitePlayerId: { $ne: userId }, 
+                {
+                    whitePlayerId: { $ne: userId },
                     blackPlayerId: null,
                     'whitePlayerElo': { $gte: minElo, $lte: maxElo }
                 }
@@ -234,23 +234,23 @@ export const findMatch = async (
             if (!match.whitePlayerId) {
                 await GameSession.updateOne(
                     { gameId: match.gameId },
-                    { 
-                        $set: { 
+                    {
+                        $set: {
                             whitePlayerId: userId,
                             whitePlayerElo: user.elo,
-                            status: 'active' 
-                        } 
+                            status: 'active'
+                        }
                     }
                 );
             } else {
                 await GameSession.updateOne(
                     { gameId: match.gameId },
-                    { 
-                        $set: { 
+                    {
+                        $set: {
                             blackPlayerId: userId,
                             blackPlayerElo: user.elo,
-                            status: 'active' 
-                        } 
+                            status: 'active'
+                        }
                     }
                 );
             }
@@ -380,7 +380,7 @@ export const handleMove = (socket: Socket, io: SocketIOServer, gameId: string, m
         session.gameState = session.chess.fen();
 
 
-        io.to(gameId).emit('moveMade',{
+        io.to(gameId).emit('moveMade', {
             fen: session.gameState,
             move: move
         })
@@ -390,13 +390,13 @@ export const handleMove = (socket: Socket, io: SocketIOServer, gameId: string, m
                 status: 'gameOver',
                 reason: '',
                 winner: '',
-                winnerId:''
+                winnerId: ''
             }
 
             if (session.chess.isCheckmate()) {
                 result.reason = 'checkmate';
                 result.winner = session.chess.turn() === 'w' ? 'black' : 'white';
-                
+
                 // Who join first is white so if the current turn is white, black wins
                 // result.winnerId = session.chess.turn() === 'w'? session.playerSockets[1].id : session.playerSockets[0].id;
                 // console.log("Winner is: ",  result.winnerId);
@@ -513,112 +513,258 @@ export const handleDisconnect = (socket: Socket, reason: string) => {
  * Retrieve game history for a specific user without loading moves
  */
 const prisma = new PrismaClient();
+
 export const getUserNameById = async (userId: string): Promise<string | null> => {
     try {
         const user = await prisma.users.findUnique({
             where: { id: userId },
-            select: { username: true } // Assuming the user's name is stored in the `username` field
+            select: { username: true },
         });
-
         return user ? user.username : null;
     } catch (error) {
         console.error(`Error fetching user name for ID ${userId}:`, error);
-        return null; // Return null or handle the error as needed
+        return null;
     }
 };
 
+// export const retrieveGameSessions = async (
+//     userId: string,
+//     options: {
+//         limit?: number;
+//         skip?: number;
+//         status?: string;
+//         playMode?: string;
+//     } = {}
+// ) => {
+//     const { limit = 10, skip = 0, status, playMode } = options;
+
+//     try {
+//         // Build query to find games where user was either white or black
+//         const query: any = {
+//             $or: [
+//                 { whitePlayerId: userId },
+//                 { blackPlayerId: userId }
+//             ]
+//         };
+
+//         // Add optional filters
+//         if (status) query.status = status;
+//         if (playMode) query.playMode = playMode;
+
+//         // Find games without including moves
+//         const gameSessions = await GameSession.find(query)
+//             .select('-moves') // Exclude the moves array to reduce payload
+//             .sort({ startTime: -1 }) // Most recent games first
+//             .skip(skip)
+//             .limit(limit);
+
+//         // Get total count for pagination
+//         const total = await GameSession.countDocuments(query);
+
+//         // Format the results
+//         const games = await Promise.all(
+//             gameSessions.map(async (session) => {
+//                 const isWhite = session.whitePlayerId === userId;
+//                 const opponentId = isWhite ? session.blackPlayerId : session.whitePlayerId;
+//                 const opponentName = opponentId ? await getUserNameById(opponentId) : null;
+
+//                 let result = "ongoing";
+//                 if (session.result === "1/2-1/2") {
+//                     result = "draw";
+//                 } else if (
+//                     (isWhite && session.result === "1-0") ||
+//                     (!isWhite && session.result === "0-1")
+//                 ) {
+//                     result = "Victory";
+//                 } else if (
+//                     (isWhite && session.result === "0-1") ||
+//                     (!isWhite && session.result === "1-0")
+//                 ) {
+//                     result = "Defeat";
+//                 }
+
+//                 return {
+//                     gameId: session.gameId,
+//                     playedAs: isWhite ? 'white' : 'black',
+//                     opponentId: opponentId,
+//                     opponentName: opponentName,
+//                     startTime: session.startTime,
+//                     endTime: session.endTime,
+//                     result: result,
+//                     status: session.status,
+//                     playMode: session.playMode,
+//                     timeLimit: session.timeLimit
+//                 };
+//             })
+//         );
+
+//         return {
+//             games,
+//             pagination: { total, limit, skip }
+//         };
+//     } catch (error) {
+//         console.error(`Error retrieving game sessions for user ID ${userId}:`, error);
+//         throw new Error("Failed to retrieve game sessions. Please try again later.");
+//     }
+// };
+
+
+
+
+export interface RetrieveOptions {
+    limit?: number;
+    skip?: number;
+    status?: string;
+    playMode?: string;
+}
+
+export class ValidationError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'ValidationError';
+    }
+}
+
 export const retrieveGameSessions = async (
     userId: string,
-    options: {
-        limit?: number;
-        skip?: number;
-        status?: string;
-        playMode?: string;
-    } = {}
-) => {
+    options: RetrieveOptions = {}
+): Promise<{
+    games: Array<{
+        gameId: string;
+        playedAs: string | null;
+        opponentId: string | null;
+        opponentName: string | null;
+        startTime: Date | null;
+        endTime: Date | null;
+        result: 'Victory' | 'Defeat' | 'Draw' | 'ongoing';
+        status: string;
+        playMode: string;
+        timeLimit: number;
+    }>;
+    pagination: { total: number; limit: number; skip: number };
+}> => {
+    // === 1) PARAM VALIDATION (throws ValidationError) ===
+    if (!validator.isUUID(userId, 4)) {
+        throw new ValidationError('Invalid userId: must be a valid UUID v4');
+    }
+
     const { limit = 10, skip = 0, status, playMode } = options;
 
-    try {
-        // Build query to find games where user was either white or black
-        const query: any = {
-            $or: [
-                { whitePlayerId: userId },
-                { blackPlayerId: userId }
-            ]
-        };
+    if (!validator.isInt(String(limit), { min: 1, max: 1000 })) {
+        throw new ValidationError('Invalid limit: must be an integer between 1 and 1000');
+    }
+    if (!validator.isInt(String(skip), { min: 0 })) {
+        throw new ValidationError('Invalid skip: must be a non-negative integer');
+    }
 
-        // Add optional filters
+    const allowedStatuses = ['ongoing', 'finished', 'draw'];
+    if (status != null && !allowedStatuses.includes(status)) {
+        throw new ValidationError(`Invalid status: must be one of ${allowedStatuses.join(', ')}`);
+    }
+
+    const allowedModes = ['blitz', 'rapid', 'classical'];
+    if (playMode != null && !allowedModes.includes(playMode)) {
+        throw new ValidationError(`Invalid playMode: must be one of ${allowedModes.join(', ')}`);
+    }
+
+    // === 2) DB LOGIC (only this is caught below) ===
+    try {
+        const query: any = {
+            $or: [{ whitePlayerId: userId }, { blackPlayerId: userId }],
+        };
         if (status) query.status = status;
         if (playMode) query.playMode = playMode;
 
-        // Find games without including moves
-        const gameSessions = await GameSession.find(query)
-            .select('-moves') // Exclude the moves array to reduce payload
-            .sort({ startTime: -1 }) // Most recent games first
-            .skip(skip)
-            .limit(limit);
+        // Fetch sessions and total count in parallel
+        const [sessions, total] = await Promise.all([
+            GameSession.find(query)
+                .select('-moves')
+                .sort({ startTime: -1 })
+                .skip(skip)
+                .limit(limit),
+            GameSession.countDocuments(query),
+        ]);
 
-        // Get total count for pagination
-        const total = await GameSession.countDocuments(query);
-
-        // Format the results
+        // Map to your DTO
         const games = await Promise.all(
-            gameSessions.map(async (session) => {
+            sessions.map(async (session) => {
                 const isWhite = session.whitePlayerId === userId;
-                const opponentId = isWhite ? session.blackPlayerId : session.whitePlayerId;
-                const opponentName = opponentId ? await getUserNameById(opponentId) : null;
+                const opponentId = isWhite
+                    ? session.blackPlayerId
+                    : session.whitePlayerId;
 
-                let result = "ongoing";
-                if (session.result === "1/2-1/2") {
-                    result = "draw";
+                // Fetch opponent name via Prisma
+                const opponentName = opponentId
+                    ? (await prisma.users.findUnique({
+                        where: { id: opponentId },
+                        select: { username: true }
+                    }))?.username ?? null
+                    : null;
+
+                // Compute result
+                let result: 'Victory' | 'Defeat' | 'Draw' | 'ongoing' = 'ongoing';
+                if (session.result === '1/2-1/2') {
+                    result = 'Draw';
                 } else if (
-                    (isWhite && session.result === "1-0") ||
-                    (!isWhite && session.result === "0-1")
+                    (isWhite && session.result === '1-0') ||
+                    (!isWhite && session.result === '0-1')
                 ) {
-                    result = "Victory";
+                    result = 'Victory';
                 } else if (
-                    (isWhite && session.result === "0-1") ||
-                    (!isWhite && session.result === "1-0")
+                    (isWhite && session.result === '0-1') ||
+                    (!isWhite && session.result === '1-0')
                 ) {
-                    result = "Defeat";
+                    result = 'Defeat';
                 }
 
                 return {
                     gameId: session.gameId,
                     playedAs: isWhite ? 'white' : 'black',
-                    opponentId: opponentId,
-                    opponentName: opponentName,
+                    opponentId,
+                    opponentName,
                     startTime: session.startTime,
                     endTime: session.endTime,
-                    result: result,
+                    result,
                     status: session.status,
                     playMode: session.playMode,
-                    timeLimit: session.timeLimit
+                    timeLimit: session.timeLimit,
                 };
             })
         );
 
         return {
             games,
-            pagination: { total, limit, skip }
+            pagination: { total, limit, skip },
         };
-    } catch (error) {
-        console.error(`Error retrieving game sessions for user ID ${userId}:`, error);
-        throw new Error("Failed to retrieve game sessions. Please try again later.");
+    } catch (err) {
+        // Log the full error for your own debugging
+        console.error(`Error retrieving game sessions for ${userId}`, err);
+        // Throw a generic service‐error for unknown failures
+        throw new Error('Failed to retrieve game sessions. Please try again later.');
     }
 };
 /**
  * Retrieve moves for a specific game when user clicks on a game in history
  */
 export const retrieveGameMoves = async (gameId: string) => {
-    const game = await GameSession.findOne({ gameId });
-    
-    if (!game) {
-      throw new Error(`Game with ID ${gameId} not found`);
+    if (!validator.isUUID(gameId, 4)) {
+        throw new ValidationError('Invalid gameId: must be a valid UUID v4');
     }
-    
-    return {
-      gameId: game.gameId,
-      moves: game.moves
-    };
-  };
+
+    try {
+        const game = await GameSession.findOne({ gameId });
+        if (!game) {
+            throw new Error(`Game with ID ${gameId} not found`);
+        }
+
+        return {
+            gameId: game.gameId,
+            moves: game.moves,
+        };
+    } catch (err: any) {
+        if (err instanceof ValidationError) throw err;
+
+        console.error(`Error retrieving moves for game ${gameId}:`, err);
+        throw new Error('Failed to retrieve game moves. Please try again later.');
+    }
+};
