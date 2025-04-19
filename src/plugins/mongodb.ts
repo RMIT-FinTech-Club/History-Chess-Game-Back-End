@@ -1,20 +1,37 @@
-import fastifyPlugin from 'fastify-plugin';
-import { FastifyInstance } from 'fastify';
-import { MongoClient } from 'mongodb';
+import fp from 'fastify-plugin';
+import { FastifyInstance, FastifyPluginAsync } from 'fastify';
+import mongoose, { Mongoose } from 'mongoose';
 import { dbConfig } from '../configs/db';
 
-async function mongoPlugin(fastify: FastifyInstance) {
-  const client = new MongoClient(dbConfig.mongodb.url);
-  await client.connect();
-  const db = client.db('ftc_history_chess_game');
-
-  fastify.decorate('mongo', { client, db });
-  fastify.log.info('MongoDB connected successfully');
-
-  fastify.addHook('onClose', async () => {
-    await client.close();
-    fastify.log.info('MongoDB connection closed');
-  });
+interface MongoDBPlugin {
+    mongoose: Mongoose; // Keep this for type hinting
 }
 
-export default fastifyPlugin(mongoPlugin);
+const mongodbPlugin: FastifyPluginAsync = fp(async (fastify: FastifyInstance) => {
+    try {
+        // Connect with MongoDB using Mongoose
+        await mongoose.connect(dbConfig.mongodb.url, {
+            serverSelectionTimeoutMS: 5000,
+            connectTimeoutMS: 10000,
+            dbName: dbConfig.mongodb.database, // Specify the database name here
+        });
+
+        // Decorate the Fastify instance with the Mongoose connection
+        fastify.decorate('mongo', mongoose);
+
+        // Add a hook to close the Mongoose connection on Fastify server close
+        fastify.addHook('onClose', async (instance) => {
+            await (instance as FastifyInstance & { mongo: MongoDBPlugin }).mongo.mongoose.connection.close();
+        });
+
+        fastify.log.info('MongoDB connected successfully with Mongoose');
+    } catch (error: any) {
+        fastify.log.error('MongoDB connection failed with Mongoose:', error);
+        throw new Error(`Failed to connect to MongoDB with Mongoose: ${error.message}`);
+    }
+}, {
+    name: 'mongodb',
+    fastify: '5.x'
+});
+
+export default mongodbPlugin;

@@ -4,6 +4,7 @@ async function seedNeon() {
   try {
     console.log("Seeding data for NeonDB");
 
+    // Insert Users
     const users = await postgresPrisma.users.createMany({
       data: [
         {
@@ -11,27 +12,28 @@ async function seedNeon() {
           email: "alice@gmail.com",
           hashedPassword: "hashPasswordAllice",
           walletAddress: "0xPlayerAliceWallet",
-          elo: 1500,
+          elo: 1500
         },
         {
           username: "Emma",
           email: "emma@gmail.com",
           hashedPassword: "hashPasswordEmma",
           walletAddress: "0xPlayerEmmaWallet",
-          elo: 1500,
+          elo: 1500
         },
         {
           username: "Ben",
           email: "ben@gmail.com",
           hashedPassword: "hashPasswordBen",
           walletAddress: "0xPlayerBenWallet",
-          elo: 1800,
-        },
+          elo: 1800
+        }
       ],
       skipDuplicates: true,
     });
     console.log(`${users.count} Users Created`);
 
+    // Insert NFTs:
     const nfts = await postgresPrisma.nfts.createMany({
       data: [
         {
