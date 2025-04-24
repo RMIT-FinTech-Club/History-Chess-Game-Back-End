@@ -1,8 +1,8 @@
 import { FastifyInstance } from 'fastify';
-import * as bcrypt from 'bcrypt';
-import * as jwt from 'jsonwebtoken';
-import * as nodemailer from 'nodemailer';
-import * as validator from 'validator';
+import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
+import nodemailer from 'nodemailer';
+import validator from 'validator';
 import { postgresPrisma } from '../configs/prismaClient';
 
 interface UserProfileResponse {
@@ -52,9 +52,9 @@ class UsersService {
       this.logger.warn(`Non-alphanumeric username attempt: ${trimmed}`);
       throw new Error('Username must contain only letters and numbers');
     }
-    return trimmed.toLowerCase(); // Canonicalize to lowercase
+    return trimmed.toLowerCase();
   }
-  // Validation process for the email
+
   private validateEmail(email: string): string {
     if (!email || typeof email !== 'string') {
       this.logger.warn(`Invalid email type: ${typeof email}`);
@@ -68,6 +68,12 @@ class UsersService {
     if (!validator.isEmail(trimmed) || !trimmed.endsWith('@gmail.com')) {
       this.logger.warn(`Invalid email format attempt: ${trimmed}`);
       throw new Error('Email must be a valid Gmail address (e.g., user@gmail.com)');
+    }
+    // Restrict special characters to only @ and .
+    const validEmailRegex = /^[a-zA-Z0-9@.]+$/;
+    if (!validEmailRegex.test(trimmed)) {
+      this.logger.warn(`Email contains invalid special characters: ${trimmed}`);
+      throw new Error('Email can only contain letters, numbers, @, and .');
     }
     const normalized = validator.normalizeEmail(trimmed, { gmail_lowercase: true }) as string;
     return validator.escape(normalized);
@@ -121,7 +127,7 @@ class UsersService {
       where: {
         username: {
           equals: cleanUsername,
-          mode: 'insensitive', // Case-insensitive check
+          mode: 'insensitive',
         },
       },
     });
@@ -150,25 +156,36 @@ class UsersService {
     };
   }
 
-  async login(username: string, password: string): Promise<{ token: string; user: UserProfileResponse }> {
-    const cleanUsername = this.validateUsername(username);
+  async login(identifier: string, password: string): Promise<{ token: string; user: UserProfileResponse }> {
+    if (!identifier || typeof identifier !== 'string') {
+      this.logger.warn(`Invalid identifier type: ${typeof identifier}`);
+      throw new Error('Username or email must be a non-empty string');
+    }
     const cleanPassword = this.validatePassword(password);
+
+    let cleanIdentifier: string;
+    let isEmail = validator.isEmail(identifier);
+    if (isEmail) {
+      cleanIdentifier = this.validateEmail(identifier);
+    } else {
+      cleanIdentifier = this.validateUsername(identifier);
+    }
 
     const user = await postgresPrisma.users.findFirst({
       where: {
-        username: {
-          equals: cleanUsername,
-          mode: 'insensitive', // Case-insensitive login
-        },
+        OR: [
+          { username: { equals: cleanIdentifier, mode: 'insensitive' } },
+          { email: cleanIdentifier },
+        ],
       },
     });
     if (!user) {
-      this.logger.warn(`Login attempt for non-existent user: ${cleanUsername}`);
-      throw new Error('User not found');
+      this.logger.warn(`Login attempt for non-existent user/email: ${cleanIdentifier}`);
+      throw new Error('User or email not found');
     }
     const isMatch = await bcrypt.compare(cleanPassword, user.hashedPassword);
     if (!isMatch) {
-      this.logger.warn(`Failed login attempt for ${cleanUsername}`);
+      this.logger.warn(`Failed login attempt for ${cleanIdentifier}`);
       throw new Error('Invalid password');
     }
     const token = this.generateToken(user.id, user.username);
@@ -200,7 +217,7 @@ class UsersService {
       where: {
         username: {
           equals: cleanUsername,
-          mode: 'insensitive', // Case-insensitive lookup
+          mode: 'insensitive',
         },
       },
     });

@@ -1,35 +1,26 @@
-import { FastifyRequest, FastifyReply, preHandlerHookHandler } from 'fastify';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import UsersService from '../services/users.service';
 
-// Extend Fastify's request type directly here
 declare module 'fastify' {
   interface FastifyRequest {
-    user?: {
-      id: string;
-      username: string;
-    };
+    user?: { id: string; username: string };
   }
 }
 
-export const authMiddleware: preHandlerHookHandler = async (request: FastifyRequest, reply: FastifyReply) => {
-  const usersService = new UsersService(request.server);
-
+export async function authMiddleware(
+  request: FastifyRequest,
+  reply: FastifyReply
+): Promise<void> {
   try {
-    const token = request.headers.authorization?.replace('Bearer ', '');
+    const token = request.headers.authorization?.split(' ')[1];
     if (!token) {
-      reply.code(401).send({ message: 'No token provided' });
+      reply.status(401).send({ message: 'Authentication token required' });
       return;
     }
-
+    const usersService = new UsersService(request.server);
     const user = await usersService.verifyToken(token);
-    request.user = user;
-
-    const params = request.params as { username?: string };
-    if (params.username && params.username !== user.username) {
-      reply.code(403).send({ message: 'You can only access your own data' });
-      return;
-    }
+    request.user = user; // Attach user to request for controller
   } catch (error: any) {
-    reply.code(401).send({ message: error.message });
+    reply.status(401).send({ message: 'Invalid or expired token' });
   }
-};
+}
