@@ -1,5 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import UsersService from '../services/users.service';
+import { DiffieHellmanGroupConstructor } from 'crypto';
 
 interface RegisterRequest {
   Body: { username: string; email: string; password: string };
@@ -16,7 +17,6 @@ interface RequestResetRequest {
 interface ResetPasswordRequest {
   Body: { email: string; resetCode: string; newPassword: string };
 }
-
 interface ProfileRequest {
   Headers: { authorization?: string };
 }
