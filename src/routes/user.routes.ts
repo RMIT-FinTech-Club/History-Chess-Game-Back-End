@@ -5,7 +5,7 @@ import {
     getUserSchema,
     updateUserSchema,
     deleteUserSchema,
-    getAllUsersSchema,
+    getAllUsersSchema, updateProfileSchema,
 } from './schemas/userSchema';
 
 export default async function userRoutes(fastify: FastifyInstance) {
@@ -31,6 +31,11 @@ export default async function userRoutes(fastify: FastifyInstance) {
     fastify.put('/users/:id', {
         schema: updateUserSchema,
         handler: userController.updateUser,
+    });
+
+    fastify.put('/users/:id/profile', {
+        schema: updateProfileSchema,
+        handler: userController.updateProfile,
     });
     
     // Delete a user

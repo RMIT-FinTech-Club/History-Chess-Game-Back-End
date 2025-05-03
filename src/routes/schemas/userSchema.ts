@@ -60,6 +60,60 @@ export const getUserSchema = {
     }
 };
 
+export const updateProfileSchema = {
+    tags: ['user', 'profile'],
+    summary: 'Update user profile',
+    description: 'Allows users to update their own profile information',
+    params: {
+        type: 'object',
+        required: ['id'],
+        properties: {
+            id: { type: 'string', format: 'uuid' }
+        }
+    },
+    body: {
+        type: 'object',
+        properties: {
+            username: {
+                type: 'string',
+                minLength: 3,
+                description: 'Update username'
+            },
+            email: {
+                type: 'string',
+                format: 'email',
+                description: 'Update email address'
+            },
+            password: {
+                type: 'string',
+                minLength: 6,
+                description: 'Update password'
+            },
+            walletAddress: {
+                type: 'string',
+                nullable: true,
+                description: 'Update wallet address'
+            }
+        },
+        additionalProperties: false
+    },
+    response: {
+        200: userResponseSchema,
+        404: {
+            type: 'object',
+            properties: {
+                message: { type: 'string' }
+            }
+        },
+        409: {
+            type: 'object',
+            properties: {
+                message: { type: 'string' }
+            }
+        }
+    }
+};
+
 export const updateUserSchema = {
     tags: ['user'],
     params: {

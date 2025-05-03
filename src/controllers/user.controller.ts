@@ -1,7 +1,7 @@
 // This controller handles HTTP requests related to users
 
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { userService, CreateUserInput, UpdateUserInput } from '../services/user.service';
+import {userService, CreateUserInput, UpdateUserInput, UpdateProfileInput} from '../services/user.service';
 
 interface IdParams { // (e.g., /users/:id)
     id: string;
@@ -81,6 +81,32 @@ export const userController = {
                 // Prisma unique constraint error
                 return reply.code(409).send({ 
                     message: 'Username, email, or wallet address already exists' 
+                });
+            }
+            return reply.code(500).send({ message: 'Internal server error' });
+        }
+    },
+
+    async updateProfile(
+        request: FastifyRequest<{ Params: IdParams; Body: UpdateProfileInput }>,
+        reply: FastifyReply
+    ) {
+        const { id } = request.params;
+
+        try {
+            const updatedUser = await userService.updateProfile(id, request.body);
+
+            if (!updatedUser) {
+                return reply.code(404).send({ message: 'User not found' });
+            }
+
+            return reply.code(200).send(updatedUser);
+        } catch (error) {
+            request.log.error(error);
+            if ((error as any).code === 'P2002') {
+                // Prisma unique constraint error
+                return reply.code(409).send({
+                    message: 'Username, email, or wallet address already exists'
                 });
             }
             return reply.code(500).send({ message: 'Internal server error' });
