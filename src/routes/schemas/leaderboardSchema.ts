@@ -1,8 +1,8 @@
 import { userProperties } from "./userSchema";
 
 export interface LeaderboardEntry {
-  id: string;
   rank: number; // Calculated rank
+  id: string;
   username: string;
   elo: number;
   wins: number;
@@ -16,6 +16,8 @@ export interface LeaderboardResponse {
   currentPage: number;
   totalPages: number;
 }
+
+export type SortOption = 'elo_desc' | 'elo_asc' | 'username_desc' | 'username_asc';
 
 // Schema for a single entry in the leaderboard response
 const leaderboardEntrySchema = {
@@ -51,6 +53,12 @@ export const getLeaderboardSchema = {
         minimum: 1,
         default: 1,
         description: "The page number to retrieve.",
+      },
+      sort: {
+        type: "string",
+        enum: ["elo_desc", "elo_asc", "username_desc", "username_asc"],
+        default: "elo_desc",
+        description: "Sorting option for the leaderboard.",
       },
     },
     additionalProperties: false,

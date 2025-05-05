@@ -1,11 +1,11 @@
 import { FastifyRequest, FastifyReply } from "fastify";
 import { getLeaderboardService } from "../services/leaderboard.service";
-import { LeaderboardResponse } from "../routes/schemas/leaderboardSchema";
+import { LeaderboardResponse, SortOption } from "../routes/schemas/leaderboardSchema";
 import validator from "validator";
-
 interface GetLeaderboardQuery {
   limit: number;
   page: number;
+  sort: SortOption;
 }
 
 export const leaderboardController = {
@@ -14,14 +14,15 @@ export const leaderboardController = {
     reply: FastifyReply
   ) {
     try {
-      let { limit, page } = request.query;
-
+      let { limit, page, sort } = request.query;
+      request.log.info("Received query params: %o", { limit, page, sort });
+      // Validate and sanitize pageSize parameter
       const limitStr = String(limit);
-
+      request.log.info("Validating pageSize: %s", limitStr); 
       if (!validator.isInt(limitStr, { min: 1, max: 100 })) {
         return reply.code(400).send({
           message:
-            "Invalid limit parameter. Must be an integer between 1 and 100.",
+            "Invalid pageSize parameter. Must be an integer between 1 and 100.",
         });
       }
 
@@ -34,26 +35,36 @@ export const leaderboardController = {
         });
       }
 
-      // Convert to integers after validation
-      const validatedLimit = validator.toInt(limitStr);
-      const validatedPage = validator.toInt(pageStr);
+      const validSortOptions: SortOption[] = ['elo_desc', 'elo_asc', 'username_desc', 'username_asc'];
 
-      // Calculate offset based on current page and limit
-      const offset = (validatedPage - 1) * validatedLimit;
+      if (!validSortOptions.includes(sort)) {
+        sort = 'elo_desc'; 
+      }
+      
+      const [sortBy, sortDir] = sort.split('_');
+
+      // Convert to integers after validation
+      const sanitizedLimit = validator.toInt(limitStr);
+      const sanitizedPage = validator.toInt(pageStr);
+
+      // Calculate offset based on current page and pageSize
+      const offset = (sanitizedPage - 1) * sanitizedLimit;
 
       const { leaderboard, totalRecords } =
         await getLeaderboardService.fetchLeaderboard(
           request.server.prisma,
-          validatedLimit,
-          offset
+          sanitizedLimit,
+          offset,
+          sortBy as 'elo' | 'username',
+          sortDir as 'asc' | 'desc'
         );
 
-      const totalPages = Math.ceil(totalRecords / validatedLimit);
+      const totalPages = Math.ceil(totalRecords / sanitizedLimit);
 
       const response: LeaderboardResponse = {
         leaderboard,
         totalRecords,
-        currentPage: validatedPage,
+        currentPage: sanitizedPage,
         totalPages
       };
 

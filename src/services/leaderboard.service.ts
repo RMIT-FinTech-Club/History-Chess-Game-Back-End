@@ -2,7 +2,6 @@ import { PrismaClient } from "@prisma/client";
 import { GameSession } from "../models/GameSession";
 import { LeaderboardEntry } from "../routes/schemas/leaderboardSchema";
 import { GameResult, GameStatus } from "../types/enum";
-
 interface UserGameStats {
   _id: string;
   wins: number;
@@ -14,9 +13,15 @@ export const getLeaderboardService = {
   async fetchLeaderboard(
     prisma: PrismaClient,
     pageSize: number = 20,
-    offset: number
+    offset: number,
+    sortBy: 'elo' | 'username' = 'elo',
+    sortDir: 'asc' | 'desc' = 'desc'
   ) {
     try {
+      const orderBy: any = {};
+
+      orderBy[sortBy] = sortDir;
+
       const [users, totalRecords] = await prisma.$transaction([
         prisma.users.findMany({
           select: {
@@ -24,9 +29,7 @@ export const getLeaderboardService = {
             username: true,
             elo: true,
           },
-          orderBy: {
-            elo: "desc",
-          },
+          orderBy: orderBy,
           skip: offset,
           take: pageSize,
         }),
@@ -255,8 +258,8 @@ export const getLeaderboardService = {
           }; 
           // Default to 0 if no stats found
           return {
-            id: user.id,
             rank: offset + index + 1, // Calculate rank based on offset and position
+            id: user.id,
             username: user.username,
             elo: user.elo,
             wins: stats.wins,
