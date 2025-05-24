@@ -34,7 +34,7 @@ class UsersController {
   }
 
   async register(
-    request: FastifyRequest<RegisterRequest>,
+    request: FastifyRequest<RegisterRequest>, // Register a new user
     reply: FastifyReply
   ): Promise<void> {
     try {
