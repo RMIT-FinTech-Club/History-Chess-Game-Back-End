@@ -69,7 +69,6 @@ class UsersService {
       this.logger.warn(`Invalid email format attempt: ${trimmed}`);
       throw new Error('Email must be a valid Gmail address (e.g., user@gmail.com)');
     }
-    // Restrict special characters to only @ and .
     const validEmailRegex = /^[a-zA-Z0-9@.]+$/;
     if (!validEmailRegex.test(trimmed)) {
       this.logger.warn(`Email contains invalid special characters: ${trimmed}`);
@@ -118,7 +117,7 @@ class UsersService {
     return jwt.sign({ id, username }, this.jwtSecret, { expiresIn: '1h', noTimestamp: true });
   }
 
-  async register(username: string, password: string, email: string): Promise<{ token: string; user: UserProfileResponse }> {
+  async register(username: string, password: string, email: string): Promise<{ token: string; data: UserProfileResponse }> {
     const cleanUsername = this.validateUsername(username);
     const cleanEmail = this.validateEmail(email);
     const cleanPassword = this.validatePassword(password);
@@ -152,11 +151,11 @@ class UsersService {
     const token = this.generateToken(user.id, user.username);
     return {
       token,
-      user: { id: user.id, username: user.username, email: user.email, walletAddress: user.walletAddress, elo: user.elo, createdAt: user.createdAt },
+      data: { id: user.id, username: user.username, email: user.email, walletAddress: user.walletAddress, elo: user.elo, createdAt: user.createdAt },
     };
   }
 
-  async login(identifier: string, password: string): Promise<{ token: string; user: UserProfileResponse }> {
+  async login(identifier: string, password: string): Promise<{ token: string; data: UserProfileResponse }> {
     if (!identifier || typeof identifier !== 'string') {
       this.logger.warn(`Invalid identifier type: ${typeof identifier}`);
       throw new Error('Username or email must be a non-empty string');
@@ -191,7 +190,7 @@ class UsersService {
     const token = this.generateToken(user.id, user.username);
     return {
       token,
-      user: { id: user.id, username: user.username, email: user.email, walletAddress: user.walletAddress, elo: user.elo, createdAt: user.createdAt },
+      data: { id: user.id, username: user.username, email: user.email, walletAddress: user.walletAddress, elo: user.elo, createdAt: user.createdAt },
     };
   }
 
@@ -220,6 +219,15 @@ class UsersService {
           mode: 'insensitive',
         },
       },
+    });
+    if (!user) throw new Error('User not found');
+    return { id: user.id, username: user.username, email: user.email, walletAddress: user.walletAddress, elo: user.elo, createdAt: user.createdAt };
+  }
+
+  async getUserByEmail(email: string): Promise<UserProfileResponse> {
+    const cleanEmail = this.validateEmail(email);
+    const user = await postgresPrisma.users.findUnique({
+      where: { email: cleanEmail },
     });
     if (!user) throw new Error('User not found');
     return { id: user.id, username: user.username, email: user.email, walletAddress: user.walletAddress, elo: user.elo, createdAt: user.createdAt };
@@ -278,6 +286,101 @@ class UsersService {
 
     const newToken = this.generateToken(user.id, user.username);
     return { token: newToken };
+  }
+
+  async updatePassword(userId: string, oldPassword: string, newPassword: string): Promise<void> {
+    if (!validator.isUUID(userId)) {
+      this.logger.error(`Invalid user ID: ${userId}`);
+      throw new Error('Invalid user ID');
+    }
+    const cleanOldPassword = this.validatePassword(oldPassword);
+    const cleanNewPassword = this.validatePassword(newPassword);
+
+    const user = await postgresPrisma.users.findUnique({ where: { id: userId } });
+    if (!user) {
+      this.logger.warn(`User not found: ${userId}`);
+      throw new Error('User not found');
+    }
+
+    const isMatch = await bcrypt.compare(cleanOldPassword, user.hashedPassword);
+    if (!isMatch) {
+      this.logger.warn(`Invalid old password for user: ${userId}`);
+      throw new Error('Invalid old password');
+    }
+
+    const isSamePassword = await bcrypt.compare(cleanNewPassword, user.hashedPassword);
+    if (isSamePassword) {
+      throw new Error('New password cannot be the same as the current password');
+    }
+
+    const hashedPassword = await bcrypt.hash(cleanNewPassword, 10);
+    await postgresPrisma.users.update({
+      where: { id: userId },
+      data: { hashedPassword },
+    });
+  }
+
+  async updateProfile(
+    userId: string,
+    updates: { username?: string; email?: string; walletAddress?: string; avatar?: string }
+  ): Promise<void> {
+    if (!validator.isUUID(userId)) {
+      this.logger.error(`Invalid user ID: ${userId}`);
+      throw new Error('Invalid user ID');
+    }
+
+    const user = await postgresPrisma.users.findUnique({ where: { id: userId } });
+    if (!user) {
+      this.logger.warn(`User not found: ${userId}`);
+      throw new Error('User not found');
+    }
+
+    const data: any = {};
+
+    if (updates.username && updates.username !== user.username) {
+      const cleanUsername = this.validateUsername(updates.username);
+      const existingUser = await postgresPrisma.users.findFirst({
+        where: {
+          username: { equals: cleanUsername, mode: 'insensitive' },
+          id: { not: userId },
+        },
+      });
+      if (existingUser) {
+        throw new Error('Username already taken');
+      }
+      data.username = cleanUsername;
+    }
+
+    if (updates.email && updates.email !== user.email) {
+      const cleanEmail = this.validateEmail(updates.email);
+      const existingEmail = await postgresPrisma.users.findFirst({
+        where: { email: cleanEmail, id: { not: userId } },
+      });
+      if (existingEmail) {
+        throw new Error('Email already registered');
+      }
+      data.email = cleanEmail;
+    }
+
+    if (updates.walletAddress !== undefined) {
+      data.walletAddress = updates.walletAddress || null;
+    }
+
+    if (updates.avatar) {
+      if (!validator.isURL(updates.avatar)) {
+        throw new Error('Avatar must be a valid URL');
+      }
+      data.avatar = updates.avatar;
+    }
+
+    if (Object.keys(data).length === 0) {
+      throw new Error('No valid updates provided');
+    }
+
+    await postgresPrisma.users.update({
+      where: { id: userId },
+      data,
+    });
   }
 }
 

@@ -8,10 +8,11 @@ const fastify: FastifyInstance = Fastify({ logger: true });
 
 fastify.register(require('@fastify/cors'), {
   origin: 'http://localhost:3000',
-  methods: ['GET', 'POST'],
+  methods: ['GET', 'POST', 'PUT'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 });
 
+fastify.register(require('@fastify/multipart'));
 fastify.register(require('./src/plugins/neon'));
 fastify.decorate('prisma', { postgres: postgresPrisma });
 fastify.register(require('./src/routes/users.router'), { prefix: '/users' });
