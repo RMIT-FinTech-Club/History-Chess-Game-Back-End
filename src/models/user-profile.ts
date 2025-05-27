@@ -19,6 +19,8 @@ export interface UserProfileUpdate {
     email?: string;
     walletAddress?: string;
     password?: string;
+    language?: string;
+    avatarUrl?: string | null;
 }
 
 // JSON schema for Swagger

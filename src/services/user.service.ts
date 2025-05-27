@@ -22,6 +22,8 @@ export interface UpdateProfileInput {
     email?: string;
     password?: string;
     walletAddress?: string;
+    language?: string;
+    avatarUrl?: string;
 }
 
 
@@ -132,6 +134,13 @@ export const userService = {
         if (data.email) updateData.email = data.email;
         if (data.password) updateData.hashedPassword = hashPassword(data.password);
         if (data.walletAddress !== undefined) updateData.walletAddress = data.walletAddress;
+        if (data.language) {
+            // Validate language is either 'en' or 'vi'
+            if (data.language === 'en' || data.language === 'vi') {
+                updateData.language = data.language;
+            }
+        }
+        if (data.avatarUrl !== undefined) updateData.avatarUrl = data.avatarUrl;
 
         try {
             const updatedUser = await prisma.users.update({

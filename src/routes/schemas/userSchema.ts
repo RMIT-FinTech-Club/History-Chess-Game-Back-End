@@ -6,6 +6,8 @@ export const userProperties = {
     username: { type: 'string' },
     email: { type: 'string', format: 'email' },
     walletAddress: { type: 'string', nullable: true },
+    avatarUrl: { type: 'string', nullable: true },
+    language: { type: 'string', enum: ['en', 'vi'] },
     elo: { type: 'integer' },
     createdAt: { type: 'string', format: 'date-time' },
     updatedAt: { type: 'string', format: 'date-time' }
@@ -60,6 +62,49 @@ export const getUserSchema = {
     }
 };
 
+export const uploadAvatarSchema = {
+    tags: ['user', 'profile'],
+    summary: 'Upload user avatar',
+    description: 'Upload a profile picture for the user',
+    consumes: ['multipart/form-data'],
+    params: {
+        type: 'object',
+        required: ['id'],
+        properties: {
+            id: { type: 'string', format: 'uuid' }
+        }
+    },
+    response: {
+        200: {
+            type: 'object',
+            properties: {
+                message: { type: 'string' },
+                avatarUrl: { type: 'string' },
+                user: userResponseSchema
+            }
+        },
+        400: {
+            type: 'object',
+            properties: {
+                message: { type: 'string' }
+            }
+        },
+        404: {
+            type: 'object',
+            properties: {
+                message: { type: 'string' }
+            }
+        },
+        500: {
+            type: 'object',
+            properties: {
+                message: { type: 'string' },
+                error: { type: 'string' }
+            }
+        }
+    }
+};
+
 export const updateProfileSchema = {
     tags: ['user', 'profile'],
     summary: 'Update user profile',
@@ -93,7 +138,13 @@ export const updateProfileSchema = {
                 type: 'string',
                 nullable: true,
                 description: 'Update wallet address'
+            },
+            language: {
+                type: 'string',
+                enum: ['en', 'vi'],
+                description: 'User interface language preference'
             }
+            // Note: avatarUrl is not included here as it will be handled separately
         },
         additionalProperties: false
     },

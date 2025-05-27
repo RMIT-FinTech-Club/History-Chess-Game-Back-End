@@ -59,6 +59,31 @@ export const userController = {
         const result = await userService.getAllUsers(limit, offset);
         return reply.code(200).send(result);
     },
+
+    async getProfile(
+        request: FastifyRequest,
+        reply: FastifyReply
+    ) {
+        try {
+            // Get the user ID from the JWT token
+            const userId = (request as any).user?.id;
+
+            if (!userId) {
+                return reply.code(401).send({ message: 'Authentication required' });
+            }
+
+            const user = await userService.getUserById(userId);
+
+            if (!user) {
+                return reply.code(404).send({ message: 'User not found' });
+            }
+
+            return reply.code(200).send({ user });
+        } catch (error) {
+            request.log.error(error);
+            return reply.code(500).send({ message: 'Internal server error' });
+        }
+    },
     
     // Update a user
     async updateUser(
