@@ -5,9 +5,9 @@ export interface LeaderboardEntry {
   id: string;
   username: string;
   elo: number;
-  wins: number;
-  losses: number;
-  draws: number;
+  // wins: number;
+  // losses: number;
+  // draws: number;
 }
 
 export interface LeaderboardResponse {
@@ -27,11 +27,11 @@ const leaderboardEntrySchema = {
     id: userProperties.id, 
     username: userProperties.username,
     elo: userProperties.elo,
-    wins: { type: "integer", description: "Total wins" },
-    losses: { type: "integer", description: "Total losses" },
-    draws: { type: "integer", description: "Total draws" },
+    // wins: { type: "integer", description: "Total wins" },
+    // losses: { type: "integer", description: "Total losses" },
+    // draws: { type: "integer", description: "Total draws" },
   },
-  required: ["rank", "id", "username", "elo", "wins", "losses", "draws"],
+  required: ["rank", "id", "username", "elo"],
   additionalProperties: false,
 };
 
