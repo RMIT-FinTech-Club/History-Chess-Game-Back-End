@@ -13,7 +13,7 @@ const websocketPlugin: FastifyPluginAsync = fp(async (fastify: FastifyInstance) 
             methods: ["GET", "POST", "PUT", "DELETE"]
         },
 
-        pingTimeout: 60000, 
+        pingTimeout: 50000, 
         pingInterval: 25000, 
         connectTimeout: 45000,
        
