@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import nodemailer from 'nodemailer';
 import validator from 'validator';
 import { postgresPrisma } from '../configs/prismaClient';
+import { OAuth2Client } from 'google-auth-library';
 
 interface UserProfileResponse {
   id: string;
@@ -24,6 +25,7 @@ class UsersService {
   private transporter: nodemailer.Transporter;
   private resetCodes: Map<string, ResetCodeEntry>;
   private logger: FastifyInstance['log'];
+  private googleClient: OAuth2Client;
 
   constructor(fastify: FastifyInstance) {
     this.jwtSecret = process.env.JWT_SECRET || 'your-secret-key';
@@ -36,6 +38,11 @@ class UsersService {
         pass: process.env.EMAIL_PASS || 'your-app-password',
       },
     });
+    this.googleClient = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      'http://localhost:8080/users/google-callback'
+    );
   }
 
   private validateUsername(username: string): string {
@@ -109,12 +116,12 @@ class UsersService {
     return trimmed;
   }
 
-  private generateToken(id: string, username: string): string {
+  private generateToken(id: string, username: string, googleAuth: boolean): string {
     if (!validator.isUUID(id)) {
       this.logger.error(`Invalid UUID for token generation: ${id}`);
       throw new Error('Internal error: invalid user ID');
     }
-    return jwt.sign({ id, username }, this.jwtSecret, { expiresIn: '1h', noTimestamp: true });
+    return jwt.sign({ id, username, googleAuth }, this.jwtSecret, { expiresIn: '1h', noTimestamp: true });
   }
 
   async register(username: string, password: string, email: string): Promise<{ token: string; data: UserProfileResponse }> {
@@ -146,9 +153,10 @@ class UsersService {
         username: cleanUsername,
         hashedPassword,
         email: cleanEmail,
+        googleAuth: false,
       },
     });
-    const token = this.generateToken(user.id, user.username);
+    const token = this.generateToken(user.id, user.username, user.googleAuth);
     return {
       token,
       data: { id: user.id, username: user.username, email: user.email, walletAddress: user.walletAddress, elo: user.elo, createdAt: user.createdAt },
@@ -182,29 +190,35 @@ class UsersService {
       this.logger.warn(`Login attempt for non-existent user/email: ${cleanIdentifier}`);
       throw new Error('User or email not found');
     }
+    if (user.googleAuth) {
+      this.logger.warn(`Attempted password login for Google-authenticated user: ${cleanIdentifier}`);
+      throw new Error('This account uses Google login. Please use Google to sign in.');
+    }
     const isMatch = await bcrypt.compare(cleanPassword, user.hashedPassword);
     if (!isMatch) {
       this.logger.warn(`Failed login attempt for ${cleanIdentifier}`);
       throw new Error('Invalid password');
     }
-    const token = this.generateToken(user.id, user.username);
+    const token = this.generateToken(user.id, user.username, user.googleAuth);
     return {
       token,
       data: { id: user.id, username: user.username, email: user.email, walletAddress: user.walletAddress, elo: user.elo, createdAt: user.createdAt },
     };
   }
 
-  async verifyToken(token: string): Promise<{ id: string; username: string }> {
+  async verifyToken(token: string): Promise<{ id: string; username: string; googleAuth: boolean }> {
     if (!token || typeof token !== 'string' || !validator.isLength(token, { max: 1024 })) {
       this.logger.warn(`Invalid token format: ${token ? token.length : 'empty'}`);
       throw new Error('Token must be a non-empty string (max 1024 chars)');
     }
     try {
-      const decoded = jwt.verify(token, this.jwtSecret) as { id: string; username: string; exp?: number };
+      const decoded = jwt.verify(token, this.jwtSecret) as { id: string; username: string; googleAuth: boolean; exp?: number };
       if (!decoded.id || !decoded.username) throw new Error('Invalid token payload');
       const user = await postgresPrisma.users.findUnique({ where: { id: decoded.id } });
-      if (!user || user.username !== decoded.username) throw new Error('User not found or token mismatch');
-      return { id: decoded.id, username: decoded.username };
+      if (!user || user.username !== decoded.username || user.googleAuth !== decoded.googleAuth) {
+        throw new Error('User not found or token mismatch');
+      }
+      return { id: decoded.id, username: decoded.username, googleAuth: decoded.googleAuth };
     } catch (error) {
       throw new Error('Invalid token');
     }
@@ -237,6 +251,10 @@ class UsersService {
     const cleanEmail = this.validateEmail(email);
     const user = await postgresPrisma.users.findUnique({ where: { email: cleanEmail } });
     if (!user) throw new Error('Email not found');
+    if (user.googleAuth) {
+      this.logger.warn(`Password reset attempt for Google-authenticated user: ${cleanEmail}`);
+      throw new Error('This account uses Google login. Use Google’s account recovery to reset your password.');
+    }
 
     const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
     const resetCodeExpires = Date.now() + 15 * 60 * 1000;
@@ -253,8 +271,9 @@ class UsersService {
     try {
       await this.transporter.sendMail(mailOptions);
       this.logger.info(`Verification code sent to ${cleanEmail}`);
-    } catch (error) {
-      console.log(`Fallback: Verification code for ${cleanEmail}: ${resetCode}`);
+    } catch (error: any) {
+      this.logger.error(`Failed to send verification code to ${cleanEmail}: ${error.message}`);
+      throw new Error(`Failed to send verification code: ${error.message}`);
     }
   }
 
@@ -265,6 +284,10 @@ class UsersService {
 
     const user = await postgresPrisma.users.findUnique({ where: { email: cleanEmail } });
     if (!user) throw new Error('Email not found');
+    if (user.googleAuth) {
+      this.logger.warn(`Password reset attempt for Google-authenticated user: ${cleanEmail}`);
+      throw new Error('This account uses Google login. Use Google’s account recovery to reset your password.');
+    }
 
     const storedReset = this.resetCodes.get(cleanEmail);
     if (!storedReset || storedReset.code !== cleanResetCode) {
@@ -284,7 +307,7 @@ class UsersService {
 
     this.resetCodes.delete(cleanEmail);
 
-    const newToken = this.generateToken(user.id, user.username);
+    const newToken = this.generateToken(user.id, user.username, user.googleAuth);
     return { token: newToken };
   }
 
@@ -300,6 +323,10 @@ class UsersService {
     if (!user) {
       this.logger.warn(`User not found: ${userId}`);
       throw new Error('User not found');
+    }
+    if (user.googleAuth) {
+      this.logger.warn(`Password update attempt for Google-authenticated user: ${userId}`);
+      throw new Error('This account uses Google login. Password changes are managed through your Google account.');
     }
 
     const isMatch = await bcrypt.compare(cleanOldPassword, user.hashedPassword);
@@ -381,6 +408,116 @@ class UsersService {
       where: { id: userId },
       data,
     });
+  }
+
+  async googleAuth(state: string): Promise<string> {
+    const authUrl = this.googleClient.generateAuthUrl({
+      access_type: 'offline',
+      scope: ['profile', 'email'],
+      state,
+    });
+    return authUrl;
+  }
+
+  async googleCallback(code: string, state: string): Promise<{ email: string; tempToken: string } | { token: string; data: UserProfileResponse }> {
+    try {
+      this.logger.info(`Received Google callback with code: ${code}, state: ${state}`);
+      const { tokens } = await this.googleClient.getToken(code);
+      this.googleClient.setCredentials(tokens);
+
+      const ticket = await this.googleClient.verifyIdToken({
+        idToken: tokens.id_token!,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      });
+      const payload = ticket.getPayload();
+      if (!payload || !payload.email) {
+        this.logger.warn('Invalid Google ID token payload');
+        throw new Error('Invalid Google ID token');
+      }
+
+      this.logger.info(`Google ID token verified for email: ${payload.email}`);
+      const email = this.validateEmail(payload.email);
+
+      const existingUser = await postgresPrisma.users.findUnique({ where: { email } });
+      if (existingUser) {
+        this.logger.info(`Existing user found for Google login: ${email}`);
+        const token = this.generateToken(existingUser.id, existingUser.username, existingUser.googleAuth);
+        return {
+          token,
+          data: {
+            id: existingUser.id,
+            username: existingUser.username,
+            email: existingUser.email,
+            walletAddress: existingUser.walletAddress,
+            elo: existingUser.elo,
+            createdAt: existingUser.createdAt,
+          },
+        };
+      }
+
+      // Generate temporary token for username selection
+      const tempToken = jwt.sign({ email }, this.jwtSecret, { expiresIn: '10m' });
+      return { email, tempToken };
+    } catch (error: any) {
+      this.logger.error(`Google callback error: ${error.message}, stack: ${error.stack}`);
+      throw new Error(`Failed to authenticate with Google: ${error.message}`);
+    }
+  }
+
+  async completeGoogleLogin(tempToken: string, username: string): Promise<{ token: string; data: UserProfileResponse }> {
+    try {
+      const decoded = jwt.verify(tempToken, this.jwtSecret) as { email: string };
+      const email = this.validateEmail(decoded.email);
+      const cleanUsername = this.validateUsername(username);
+
+      // Verify email not taken (race condition check)
+      const existingUser = await postgresPrisma.users.findUnique({ where: { email } });
+      if (existingUser) {
+        this.logger.info(`Email already registered during Google login completion: ${email}`);
+        throw new Error('Email already registered');
+      }
+
+      // Verify username not taken
+      const existingUsername = await postgresPrisma.users.findFirst({
+        where: { username: { equals: cleanUsername, mode: 'insensitive' } },
+      });
+      if (existingUsername) {
+        this.logger.warn(`Duplicate username attempt during Google login: ${cleanUsername}`);
+        throw new Error('Username already taken');
+      }
+
+      // Create new user
+      const randomPassword = Math.random().toString(36).slice(-12);
+      const hashedPassword = await bcrypt.hash(randomPassword, 10);
+      const user = await postgresPrisma.users.create({
+        data: {
+          username: cleanUsername,
+          email,
+          hashedPassword,
+          googleAuth: true,
+        },
+      });
+
+      this.logger.info(`Created new user from Google login: ${email}, username: ${cleanUsername}`);
+      const token = this.generateToken(user.id, user.username, user.googleAuth);
+      return {
+        token,
+        data: { id: user.id, username: user.username, email: user.email, walletAddress: user.walletAddress, elo: user.elo, createdAt: user.createdAt },
+      };
+    } catch (error: any) {
+      this.logger.error(`Google login completion error: ${error.message}, stack: ${error.stack}`);
+      throw new Error(error.message || 'Failed to complete Google login');
+    }
+  }
+
+  async checkAuthType(email: string): Promise<{ googleAuth: boolean }> {
+    const cleanEmail = this.validateEmail(email);
+    const user = await postgresPrisma.users.findUnique({ where: { email: cleanEmail } });
+    if (!user) {
+      this.logger.warn(`Email not found for auth type check: ${cleanEmail}`);
+      throw new Error('Email not found');
+    }
+    return { googleAuth: user.googleAuth };
   }
 }
 

@@ -26,6 +26,18 @@ export interface UpdateProfileRequest extends RouteGenericInterface {
   user: { id: string; username: string };
 }
 
+export interface GoogleCallbackRequest extends RouteGenericInterface {
+  Querystring: { code: string; state: string };
+}
+
+export interface CompleteGoogleLoginRequest extends RouteGenericInterface {
+  Body: { tempToken: string; username: string };
+}
+
+export interface CheckAuthTypeRequest extends RouteGenericInterface {
+  Body: { email: string };
+}
+
 export default async function (fastify: FastifyInstance) {
   const usersController = new UsersController(fastify);
 
@@ -33,6 +45,9 @@ export default async function (fastify: FastifyInstance) {
   fastify.post('/login', usersController.login.bind(usersController));
   fastify.post('/request-reset', usersController.requestPasswordReset.bind(usersController));
   fastify.post('/reset-password', usersController.resetPassword.bind(usersController));
+  fastify.get<GoogleCallbackRequest>('/google-callback', usersController.googleCallback.bind(usersController));
+  fastify.post<CompleteGoogleLoginRequest>('/complete-google-login', usersController.completeGoogleLogin.bind(usersController));
+  fastify.post<CheckAuthTypeRequest>('/check-auth-type', usersController.checkAuthType.bind(usersController));
 
   fastify.get('/profile', { preHandler: authMiddleware }, usersController.getProfile.bind(usersController));
   fastify.get<GetUserByUsernameRequest>('/profile/:username', { preHandler: authMiddleware }, usersController.getUserByUsername.bind(usersController));

@@ -16,6 +16,7 @@ model users {
   elo            Int      @default(400)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+  googleAuth    Boolean  @default(false)
 
   ownedNFTs nfts[]
   games games[]

@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { Multipart } from '@fastify/multipart';
 import UsersService from "../services/users.service";
+import type { Multipart } from '@fastify/multipart';
 import { ProfileRequest, GetUserByUsernameRequest, UpdatePasswordRequest, UpdateProfileRequest } from "../routes/users.router";
 
 interface RegisterRequest {
@@ -17,6 +17,18 @@ interface RequestPasswordReset {
 
 interface ResetPasswordRequest {
   Body: { email: string; resetCode: string; newPassword: string };
+}
+
+interface GoogleCallbackRequest {
+  Querystring: { code: string; state: string };
+}
+
+interface CompleteGoogleLoginRequest {
+  Body: { tempToken: string; username: string };
+}
+
+interface CheckAuthTypeRequest {
+  Body: { email: string };
 }
 
 export default class UsersController {
@@ -133,10 +145,10 @@ export default class UsersController {
   ): Promise<void> {
     try {
       const { id } = request.user!;
+      const parts = await request.parts();
       const updates: { username?: string; email?: string; walletAddress?: string } = {};
 
-      // Parse FormData fields
-      for await (const part of request.parts()) {
+      for await (const part of parts) {
         if (part.type === 'field') {
           switch (part.fieldname) {
             case 'username':
@@ -148,13 +160,85 @@ export default class UsersController {
             case 'walletAddress':
               updates.walletAddress = part.value as string;
               break;
-            // Ignore avatar for now
           }
         }
       }
 
       await this.usersService.updateProfile(id, updates);
       reply.status(200).send({ message: "Profile updated successfully" });
+    } catch (error: any) {
+      reply.status(400).send({ message: error.message });
+    }
+  }
+
+  async googleCallback(
+    request: FastifyRequest<GoogleCallbackRequest>,
+    reply: FastifyReply
+  ): Promise<void> {
+    try {
+      const { code, state } = request.query;
+      const result = await this.usersService.googleCallback(code, state);
+      if ('email' in result) {
+        // New user, prompt for username
+        reply.type('text/html').send(`
+          <script>
+            window.opener.postMessage({
+              type: 'google-auth-prompt-username',
+              email: '${result.email}',
+              tempToken: '${result.tempToken}'
+            }, 'http://localhost:3000');
+            window.close();
+          </script>
+        `);
+      } else {
+        // Existing user, complete login
+        reply.type('text/html').send(`
+          <script>
+            window.opener.postMessage({
+              type: 'google-auth',
+              token: '${result.token}',
+              userId: '${result.data.id}',
+              username: '${result.data.username}',
+              email: '${result.data.email}'
+            }, 'http://localhost:3000');
+            window.close();
+          </script>
+        `);
+      }
+    } catch (error: any) {
+      reply.type('text/html').send(`
+        <script>
+          window.opener.postMessage({
+            type: 'google-auth-error',
+            error: '${error.message}'
+          }, 'http://localhost:3000');
+          window.close();
+        </script>
+      `);
+    }
+  }
+
+  async completeGoogleLogin(
+    request: FastifyRequest<CompleteGoogleLoginRequest>,
+    reply: FastifyReply
+  ): Promise<void> {
+    try {
+      const { tempToken, username } = request.body;
+      const { token, data } = await this.usersService.completeGoogleLogin(tempToken, username);
+      reply.status(200).send({ token, user: data });
+    } catch (error: any) {
+      reply.status(400).send({ message: error.message });
+    }
+  }
+
+  async checkAuthType(
+    request: FastifyRequest<CheckAuthTypeRequest>,
+    reply: FastifyReply
+  ): Promise<void> {
+    try {
+      const { email } = request.body;
+      const result = await this.usersService.checkAuthType(email);
+      reply.status(200).send(result);
     } catch (error: any) {
       reply.status(400).send({ message: error.message });
     }
