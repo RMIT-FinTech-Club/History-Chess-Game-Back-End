@@ -38,6 +38,10 @@ export interface CheckAuthTypeRequest extends RouteGenericInterface {
   Body: { email: string };
 }
 
+export interface VerifyResetCodeRequest extends RouteGenericInterface {
+  Body: { email: string; resetCode: string };
+}
+
 export default async function (fastify: FastifyInstance) {
   const usersController = new UsersController(fastify);
 
@@ -45,6 +49,7 @@ export default async function (fastify: FastifyInstance) {
   fastify.post('/login', usersController.login.bind(usersController));
   fastify.post('/request-reset', usersController.requestPasswordReset.bind(usersController));
   fastify.post('/reset-password', usersController.resetPassword.bind(usersController));
+  fastify.post('/verify-reset-code', usersController.verifyResetCode.bind(usersController));
   fastify.get<GoogleCallbackRequest>('/google-callback', usersController.googleCallback.bind(usersController));
   fastify.post<CompleteGoogleLoginRequest>('/complete-google-login', usersController.completeGoogleLogin.bind(usersController));
   fastify.post<CheckAuthTypeRequest>('/check-auth-type', usersController.checkAuthType.bind(usersController));

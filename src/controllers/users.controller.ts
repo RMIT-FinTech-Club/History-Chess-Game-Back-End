@@ -31,6 +31,10 @@ interface CheckAuthTypeRequest {
   Body: { email: string };
 }
 
+interface VerifyResetCodeRequest {
+  Body: { email: string; resetCode: string };
+}
+
 export default class UsersController {
   private usersService: UsersService;
 
@@ -191,7 +195,7 @@ export default class UsersController {
           </script>
         `);
       } else {
-        // Existing user, complete login
+        // Existing Google user, complete login
         reply.type('text/html').send(`
           <script>
             window.opener.postMessage({
@@ -239,6 +243,19 @@ export default class UsersController {
       const { email } = request.body;
       const result = await this.usersService.checkAuthType(email);
       reply.status(200).send(result);
+    } catch (error: any) {
+      reply.status(400).send({ message: error.message });
+    }
+  }
+
+  async verifyResetCode(
+    request: FastifyRequest<VerifyResetCodeRequest>,
+    reply: FastifyReply
+  ): Promise<void> {
+    try {
+      const { email, resetCode } = request.body;
+      await this.usersService.verifyResetCode(email, resetCode);
+      reply.status(200).send({ message: "Verification code is valid" });
     } catch (error: any) {
       reply.status(400).send({ message: error.message });
     }

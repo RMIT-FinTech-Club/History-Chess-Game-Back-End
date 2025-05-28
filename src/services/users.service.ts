@@ -253,7 +253,7 @@ class UsersService {
     if (!user) throw new Error('Email not found');
     if (user.googleAuth) {
       this.logger.warn(`Password reset attempt for Google-authenticated user: ${cleanEmail}`);
-      throw new Error('This account uses Google login. Use Google’s account recovery to reset your password.');
+      throw new Error('This account uses Google login. Use Google’s account recovery to reset your password at myaccount.google.com/security.');
     }
 
     const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
@@ -277,6 +277,31 @@ class UsersService {
     }
   }
 
+  async verifyResetCode(email: string, resetCode: string): Promise<void> {
+    const cleanEmail = this.validateEmail(email);
+    const cleanResetCode = this.validateResetCode(resetCode);
+
+    const user = await postgresPrisma.users.findUnique({ where: { email: cleanEmail } });
+    if (!user) {
+      this.logger.warn(`Email not found for reset code verification: ${cleanEmail}`);
+      throw new Error('Email not found');
+    }
+    if (user.googleAuth) {
+      this.logger.warn(`Reset code verification attempt for Google-authenticated user: ${cleanEmail}`);
+      throw new Error('This account uses Google login. Use Google’s account recovery to reset your password at myaccount.google.com/security.');
+    }
+
+    const storedReset = this.resetCodes.get(cleanEmail);
+    if (!storedReset || storedReset.code !== cleanResetCode) {
+      this.logger.warn(`Invalid reset code attempt for ${cleanEmail}: ${cleanResetCode}`);
+      throw new Error('Invalid verification code');
+    }
+    if (Date.now() > storedReset.expires) {
+      this.logger.warn(`Expired reset code attempt for ${cleanEmail}`);
+      throw new Error('Verification code expired');
+    }
+  }
+
   async resetPassword(email: string, resetCode: string, newPassword: string): Promise<{ token: string }> {
     const cleanEmail = this.validateEmail(email);
     const cleanResetCode = this.validateResetCode(resetCode);
@@ -286,7 +311,7 @@ class UsersService {
     if (!user) throw new Error('Email not found');
     if (user.googleAuth) {
       this.logger.warn(`Password reset attempt for Google-authenticated user: ${cleanEmail}`);
-      throw new Error('This account uses Google login. Use Google’s account recovery to reset your password.');
+      throw new Error('This account uses Google login. Use Google’s account recovery to reset your password at myaccount.google.com/security.');
     }
 
     const storedReset = this.resetCodes.get(cleanEmail);
@@ -326,7 +351,7 @@ class UsersService {
     }
     if (user.googleAuth) {
       this.logger.warn(`Password update attempt for Google-authenticated user: ${userId}`);
-      throw new Error('This account uses Google login. Password changes are managed through your Google account.');
+      throw new Error('This account uses Google login. Password changes are managed through your Google account at myaccount.google.com/security.');
     }
 
     const isMatch = await bcrypt.compare(cleanOldPassword, user.hashedPassword);
@@ -440,7 +465,11 @@ class UsersService {
 
       const existingUser = await postgresPrisma.users.findUnique({ where: { email } });
       if (existingUser) {
-        this.logger.info(`Existing user found for Google login: ${email}`);
+        if (!existingUser.googleAuth) {
+          this.logger.warn(`Google login attempt for non-Google registered email: ${email}`);
+          throw new Error('This email has been used already for a standard account. Please use a different Google account or sign in with your password.');
+        }
+        this.logger.info(`Existing Google user found: ${email}`);
         const token = this.generateToken(existingUser.id, existingUser.username, existingUser.googleAuth);
         return {
           token,
@@ -460,7 +489,7 @@ class UsersService {
       return { email, tempToken };
     } catch (error: any) {
       this.logger.error(`Google callback error: ${error.message}, stack: ${error.stack}`);
-      throw new Error(`Failed to authenticate with Google: ${error.message}`);
+      throw new Error(error.message || 'Failed to authenticate with Google');
     }
   }
 
@@ -474,7 +503,7 @@ class UsersService {
       const existingUser = await postgresPrisma.users.findUnique({ where: { email } });
       if (existingUser) {
         this.logger.info(`Email already registered during Google login completion: ${email}`);
-        throw new Error('Email already registered');
+        throw new Error('This email has been used already for a standard account. Please use a different Google account.');
       }
 
       // Verify username not taken
