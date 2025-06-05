@@ -1,35 +1,31 @@
-import { FastifyRequest, FastifyReply, preHandlerHookHandler } from 'fastify';
+import { FastifyRequest, FastifyReply } from 'fastify';
 import UsersService from '../services/users.service';
+import { FastifyInstance } from 'fastify';
 
-// Extend Fastify's request type directly here
 declare module 'fastify' {
   interface FastifyRequest {
-    user?: {
-      id: string;
-      username: string;
-    };
+    user?: { id: string; username: string };
   }
 }
 
-export const authMiddleware: preHandlerHookHandler = async (request: FastifyRequest, reply: FastifyReply) => {
-  const usersService = new UsersService(request.server);
+export async function authMiddleware(
+  request: FastifyRequest,
+  reply: FastifyReply
+): Promise<void> {
+  const authHeader = request.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    reply.status(401).send({ message: 'Missing or invalid Authorization header' });
+    return;
+  }
+
+  const token = authHeader.replace('Bearer ', '');
+  const fastify = request.server as FastifyInstance;
+  const usersService = new UsersService(fastify);
 
   try {
-    const token = request.headers.authorization?.replace('Bearer ', '');
-    if (!token) {
-      reply.code(401).send({ message: 'No token provided' });
-      return;
-    }
-
-    const user = await usersService.verifyToken(token);
-    request.user = user;
-
-    const params = request.params as { username?: string };
-    if (params.username && params.username !== user.username) {
-      reply.code(403).send({ message: 'You can only access your own data' });
-      return;
-    }
+    const decoded = await usersService.verifyToken(token);
+    request.user = decoded;
   } catch (error: any) {
-    reply.code(401).send({ message: error.message });
+    reply.status(401).send({ message: 'Invalid or expired token' });
   }
-};
+}
