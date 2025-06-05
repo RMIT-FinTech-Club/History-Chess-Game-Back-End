@@ -16,16 +16,28 @@ export interface IGameSession {
     finalFen: string | null;
     whiteTimeLeft?: number;
     blackTimeLeft?: number;
+    analysisCompleted?: boolean;
+    analysisDate?: Date;
 }
 
 export interface IMove {
     moveNumber: number;
     move: string;
+    fen?: string;
+    evaluation: number;
+    bestmove: string;
+    mate?: number;
+    continuation?: string; 
 }
 
 const MoveSchema = new Schema<IMove>({
     moveNumber: { type: Number, required: true },
-    move: { type: String, required: true }
+    move: { type: String, required: true },
+    fen: { type: String },
+    evaluation: { type: Number, required: true },
+    bestmove: { type: String, required: true },
+    mate: { type: Number, default: null },
+    continuation: { type: String },
 });
 
 const GameSessionSchema = new Schema<IGameSession>({
@@ -37,12 +49,14 @@ const GameSessionSchema = new Schema<IGameSession>({
     result: { type: String, default: '*', enum: ['*', '1-0', '0-1', '1/2-1/2'] },
     status: { type: String, required: true, enum: ['waiting', 'pending', 'active', 'finished'], default: 'waiting' },
     playMode: { type: String, required: true, enum: ['bullet', 'blitz', 'rapid'] },
-    timeLimit: { type: Number, required: true }, // in milliseconds
+    timeLimit: { type: Number, required: true },
     moves: [MoveSchema],
     challengedOpponentId: { type: String, default: null },
     finalFen: { type: String, default: null },
     whiteTimeLeft: { type: Number },
-    blackTimeLeft: { type: Number }
+    blackTimeLeft: { type: Number },
+    analysisCompleted: { type: Boolean, default: false },
+    analysisDate: { type: Date }
 });
 
 export const GameSession = mongoose.model('GameSession', GameSessionSchema);

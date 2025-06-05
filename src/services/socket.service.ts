@@ -1,9 +1,9 @@
 import { Server as SocketIOServer, Socket } from "socket.io"
-import { Chess } from "chess.js"
+import { Chess } from "chess.js";
 import fastify, { FastifyInstance } from "fastify"
 import { GameSession, IGameSession } from "../models/GameSession"
 import { GameStatus } from '../types/enum'
-import { saveGameResult, saveMove, updateElo } from "./game.service"
+import { saveGameResult, saveMove, updateElo, saveMoveWithAnalysis } from "./game.service"
 
 interface GameSessionInterface {
     gameId: string;
@@ -73,7 +73,8 @@ const getGameState = (session: GameSessionInterface) => {
         inCheck: session.chess.inCheck(),
         gameOver: session.chess.isGameOver(),
         whiteTimeLeft: session.whiteTimeLeft,
-        blackTimeLeft: session.blackTimeLeft
+        blackTimeLeft: session.blackTimeLeft,
+        analyzing: false 
     };
 }
 
@@ -99,8 +100,8 @@ export const handleMove = async (socket: Socket, io: SocketIOServer, fastify: Fa
 
     // Check if it's this player's turn
     const isWhiteTurn = session.chess.turn() === 'w';
-    const whitePlayerId = session.players[0]; // First player is white
-    const blackPlayerId = session.players[1]; // Second player is black
+    const whitePlayerId = session.players[0];
+    const blackPlayerId = session.players[1];
     
     if ((isWhiteTurn && currentPlayerId !== whitePlayerId) || 
         (!isWhiteTurn && currentPlayerId !== blackPlayerId)) {
@@ -114,13 +115,38 @@ export const handleMove = async (socket: Socket, io: SocketIOServer, fastify: Fa
 
       // Save the move to the database
       const moveNumber = session.chess.history().length;
-      await saveMove(gameId, move, moveNumber);
+      const currentFen = session.chess.fen();
+
+      // Save move with analysis (replaces saveMove)
+      const analysisPromise = saveMoveWithAnalysis(gameId, move, moveNumber, currentFen);
 
       // Broadcast the move to all players
       io.to(gameId).emit('gameState', {
           ...getGameState(session),
           moveNumber,
-          move
+          move,
+          analyzing: true
+      });
+
+      // Handle analysis result asynchronously
+      analysisPromise.then(analysis => {
+          if (analysis) {
+              io.to(gameId).emit('moveAnalysis', {
+                  moveNumber,
+                  evaluation: analysis.evaluation,
+                  bestmove: analysis.bestmove,
+                  mate: analysis.mate,
+                  continuation: analysis.continuation,
+                  analyzing: false
+              });
+          }
+      }).catch(error => {
+          console.error('Move analysis failed:', error);
+          io.to(gameId).emit('moveAnalysis', {
+              moveNumber,
+              analyzing: false,
+              error: 'Analysis failed'
+          });
       });
 
       // Check if the game is over

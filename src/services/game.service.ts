@@ -5,6 +5,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { GameSession, IGameSession } from '../models/GameSession';
 import { PlayMode, GameResult, GameStatus } from '../types/enum';
 import validator from 'validator';
+import { stockfishService } from './stockfish.service';
+import { User } from '../models';
 interface GameSession {
     gameId: string;
     playerSockets: Socket[];
@@ -61,10 +63,27 @@ export const createGame = async (
 }
 
 // Update move from player
-export const saveMove = async (gameId: string, move: string, moveNumber: number) => {
+export const saveMove = async (
+    gameId: string, 
+    move: string, 
+    moveNumber: number,
+    fen: string  // Add FEN parameter
+) => {
     await GameSession.updateOne(
         { gameId },
-        { $push: { moves: { moveNumber, move } } }
+        { 
+            $push: { 
+                moves: { 
+                    moveNumber, 
+                    move, 
+                    fen,  // Include FEN in the move object
+                    evaluation: 0,
+                    bestmove: '',
+                    mate: null,
+                    continuation: []
+                } 
+            } 
+        }
     )
 }
 
@@ -376,14 +395,18 @@ export const handleMove = (socket: Socket, io: SocketIOServer, gameId: string, m
     }
 
     try {
-        session.chess.move(move);
+        const moveResult = session.chess.move(move);
         session.gameState = session.chess.fen();
 
+        // Save the move to MongoDB with the current FEN
+        const moveNumber = session.chess.history().length;
+        saveMoveWithAnalysis(gameId, move, moveNumber, session.gameState)
+            .catch(error => console.error('Failed to save move:', error));
 
         io.to(gameId).emit('moveMade', {
             fen: session.gameState,
             move: move
-        })
+        });
 
         if (session.chess.isGameOver()) {
             let result = {
@@ -418,20 +441,172 @@ export const handleMove = (socket: Socket, io: SocketIOServer, gameId: string, m
             io.to(gameId).emit('gameOver', result);
             delete gameSessions[gameId];
         }
-
-
-
-
-
     }
     catch (error) {
         socket.emit('error', { message: 'Invalid move' });
     }
 }
 
+export const saveMoveWithAnalysis = async (
+    gameId: string,
+    move: string,
+    moveNumber: number,
+    fen: string
+) => {
+    try {
+        // First save basic move data
+        await GameSession.updateOne(
+            { gameId },
+            { 
+                $push: { 
+                    moves: {
+                        moveNumber,
+                        move,
+                        fen,
+                        evaluation: 0, // Placeholder
+                        bestmove: '', // Placeholder
+                        mate: null,
+                        continuation: ''
+                    }
+                } 
+            }
+        );
 
+        // Get analysis from Stockfish
+        const analysis = await stockfishService.analyzeMove(fen, move, moveNumber);
+        
+        // Update the move with analysis
+        await GameSession.updateOne(
+            { gameId, 'moves.moveNumber': moveNumber },
+            { 
+                $set: {
+                    'moves.$.evaluation': analysis.evaluation,
+                    'moves.$.bestmove': analysis.bestmove,
+                    'moves.$.mate': analysis.mate,
+                    'moves.$.continuation': analysis.continuation
+                }
+            }
+        );
 
+        return analysis;
 
+    } catch (error) {
+        console.error('Analysis failed:', error);
+        return null;
+    }
+};
+
+// Comprehensive post-game analysis
+export const analyzeCompleteGame = async (gameId: string): Promise<void> => {
+    try {
+        const gameSession = await GameSession.findOne({ gameId });
+        if (!gameSession || !gameSession.moves || gameSession.moves.length === 0) {
+            throw new Error('Game session or moves not found');
+        }
+
+        if (gameSession.analysisCompleted) {
+            console.log(`Game ${gameId} already analyzed`);
+            return;
+        }
+
+        console.log(`Starting comprehensive analysis for game ${gameId}`);
+
+        // Analyze each move with higher depth
+        for (let i = 0; i < gameSession.moves.length; i++) {
+            const move = gameSession.moves[i];
+            console.log(move);
+            try {
+                if (move.fen) {
+                    const analysis = await stockfishService.analyzePosition(move.fen, 15); // Higher depth
+                    console.log(analysis);
+                    // Update move with deeper analysis
+                    await GameSession.updateOne(
+                        { gameId, 'moves.moveNumber': move.moveNumber },
+                        { 
+                            $set: {
+                                'moves.$.evaluation': analysis.evaluation,
+                                'moves.$.bestmove': analysis.bestmove,
+                                'moves.$.mate': analysis.mate,
+                                'moves.$.continuation': analysis.continuation
+                            }
+                        }
+                    );
+                }
+                
+                // Small delay between analyses
+                await new Promise(resolve => setTimeout(resolve, 300));
+                
+            } catch (error) {
+                console.error(`Failed to analyze move ${i + 1}:`, error);
+                continue; // Skip failed analysis and continue
+            }
+        }
+
+        // Mark analysis as completed
+        await GameSession.updateOne(
+            { gameId },
+            { 
+                $set: {
+                    analysisCompleted: true,
+                    analysisDate: new Date()
+                }
+            }
+        );
+
+        console.log(`Comprehensive analysis completed for game ${gameId}`);
+
+    } catch (error) {
+        console.error(`Failed to complete analysis for game ${gameId}:`, error);
+    }
+};
+
+// Get game analysis data
+export const getGameAnalysis = async (gameId: string) => {
+    try {
+        const gameSession = await GameSession.findOne({ gameId }).lean();
+        if (!gameSession) {
+            throw new Error('Game not found');
+        }
+
+        // Calculate basic statistics
+        const moves = gameSession.moves || [];
+        const whiteMoves = moves.filter((_, index) => index % 2 === 0);
+        const blackMoves = moves.filter((_, index) => index % 2 === 1);
+
+        const calculateStats = (playerMoves: any[]) => {
+            const totalMoves = playerMoves.length;
+            const avgEvaluation = totalMoves > 0 
+                ? playerMoves.reduce((sum, move) => sum + Math.abs(move.evaluation || 0), 0) / totalMoves 
+                : 0;
+            
+            return {
+                totalMoves,
+                averageEvaluation: Math.round(avgEvaluation),
+                bestMoves: playerMoves.filter(m => m.bestmove && m.bestmove !== 'analysis_failed').length
+            };
+        };
+
+        return {
+            gameId,
+            whitePlayerId: gameSession.whitePlayerId,
+            blackPlayerId: gameSession.blackPlayerId,
+            result: gameSession.result,
+            playMode: gameSession.playMode,
+            moves: moves,
+            analysisCompleted: gameSession.analysisCompleted || false,
+            analysisDate: gameSession.analysisDate,
+            statistics: {
+                white: calculateStats(whiteMoves),
+                black: calculateStats(blackMoves),
+                totalMoves: moves.length
+            }
+        };
+
+    } catch (error) {
+        console.error('Error retrieving game analysis:', error);
+        throw error;
+    }
+};
 
 // export const joinGame = (socket: Socket, io: SocketIOServer, playerElo: number) => {
 //     // First check if this player is already in the waiting list
@@ -593,13 +768,13 @@ export async function retrieveGameSessions(
             where: { id: { in: opponentIds } },
             select: { id: true, username: true }
         });
-        const nameById = new Map(users.map(u => [u.id, u.username]));
+        const nameById = new Map<string, string>(users.map((u: { id: any; username: any; }) => [u.id, u.username]));
 
         // ----- 4) Map to the slim DTO -----
         return sessions.map(s => {
             const iAmWhite = s.whitePlayerId === userId;
             const oppId = iAmWhite ? s.blackPlayerId : s.whitePlayerId;
-            const oppName = oppId ? nameById.get(oppId) ?? null : null;
+            const oppName = oppId ? (nameById.get(oppId) || null) : null;
 
             // compute total seconds
             const startMs = new Date(s.startTime!).getTime();
