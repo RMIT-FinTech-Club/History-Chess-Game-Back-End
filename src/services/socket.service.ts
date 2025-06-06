@@ -121,7 +121,7 @@ export const handleMove = async (socket: Socket, io: SocketIOServer, fastify: Fa
         const currentFen = session.chess.fen();
 
       // Save move with analysis (replaces saveMove)
-      const analysisPromise = saveMoveWithAnalysis(gameId, move, moveNumber, currentFen);
+      const analysisPromise = saveMoveWithAnalysis(gameId, move, moveNumber, currentFen, currentPlayerId);
     //   await saveMove(gameId, move, moveNumber, color, currentPlayerId);
         
         // Broadcast the move to all players

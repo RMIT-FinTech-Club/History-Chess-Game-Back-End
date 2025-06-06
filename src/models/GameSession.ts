@@ -35,7 +35,14 @@ export interface IMove {
 
 const MoveSchema = new Schema<IMove>({
     moveNumber: { type: Number, required: true },
-    move: { type: String, required: true }
+    move: { type: String, required: true },
+    fen: { type: String, required: false },
+    evaluation: { type: Number, required: true },
+    bestmove: { type: String, required: true },
+    mate: { type: Number, required: false, default: null },
+    continuation: { type: String, required: false },
+    color: { type: String, required: true, enum: ['white', 'black'] },
+    playerId: { type: String, required: true }
 });
 
 const GameSessionSchema = new Schema<IGameSession>({

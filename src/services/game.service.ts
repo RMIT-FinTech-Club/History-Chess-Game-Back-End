@@ -397,7 +397,7 @@ export const createNewGameSession = (socket1: Socket, socket2: Socket): GameSess
     return newGame
 }
 
-export const handleMove = (socket: Socket, io: SocketIOServer, gameId: string, move: string) => {
+export const handleMove = (socket: Socket, io: SocketIOServer, gameId: string, move: string, userId: string) => {
     const session = gameSessions[gameId];
     if (!session) {
         socket.emit('error', { message: 'Game session not found' });
@@ -406,11 +406,16 @@ export const handleMove = (socket: Socket, io: SocketIOServer, gameId: string, m
 
     try {
         const moveResult = session.chess.move(move);
+        if (!moveResult) {
+            socket.emit('error', { message: 'Invalid move' });
+            return;
+        }
+        
         session.gameState = session.chess.fen();
 
-        // Save the move to MongoDB with the current FEN
+        // Save the move to MongoDB with the current FEN and userId
         const moveNumber = session.chess.history().length;
-        saveMoveWithAnalysis(gameId, move, moveNumber, session.gameState)
+        saveMoveWithAnalysis(gameId, move, moveNumber, session.gameState, userId) 
             .catch(error => console.error('Failed to save move:', error));
 
         io.to(gameId).emit('moveMade', {
@@ -461,10 +466,16 @@ export const saveMoveWithAnalysis = async (
     gameId: string,
     move: string,
     moveNumber: number,
-    fen: string
+    fen: string,
+    playerId: string 
 ) => {
     try {
-        // First save basic move data
+        console.log(`Starting analysis for move ${moveNumber}: ${move}`);
+        
+        // Determine color based on move number
+        const color = moveNumber % 2 === 1 ? 'white' : 'black';
+        
+        // First save basic move data with required fields
         await GameSession.updateOne(
             { gameId },
             { 
@@ -473,20 +484,26 @@ export const saveMoveWithAnalysis = async (
                         moveNumber,
                         move,
                         fen,
-                        evaluation: 0, // Placeholder
-                        bestmove: '', // Placeholder
+                        evaluation: 0,
+                        bestmove: '',
                         mate: null,
-                        continuation: ''
+                        continuation: '',
+                        color, 
+                        playerId, 
+                        timestamp: new Date()
                     }
                 } 
             }
         );
 
+        console.log(`Move ${moveNumber} saved to database, starting Stockfish analysis...`);
+
         // Get analysis from Stockfish
         const analysis = await stockfishService.analyzeMove(fen, move, moveNumber);
+        console.log(`Stockfish analysis result:`, analysis);
         
         // Update the move with analysis
-        await GameSession.updateOne(
+        const updateResult = await GameSession.updateOne(
             { gameId, 'moves.moveNumber': moveNumber },
             { 
                 $set: {
@@ -498,10 +515,34 @@ export const saveMoveWithAnalysis = async (
             }
         );
 
+        console.log(`Move ${moveNumber} analysis update result:`, updateResult);
+
+        if (updateResult.modifiedCount === 0) {
+            console.warn(`No move was updated for gameId: ${gameId}, moveNumber: ${moveNumber}`);
+        }
+
         return analysis;
 
     } catch (error) {
-        console.error('Analysis failed:', error);
+        console.error(`Analysis failed for move ${moveNumber}:`, error);
+        
+        // Update move with error indicator
+        try {
+            await GameSession.updateOne(
+                { gameId, 'moves.moveNumber': moveNumber },
+                { 
+                    $set: {
+                        'moves.$.evaluation': 0,
+                        'moves.$.bestmove': 'analysis_failed',
+                        'moves.$.mate': null,
+                        'moves.$.continuation': 'Error: Analysis failed'
+                    }
+                }
+            );
+        } catch (updateError) {
+            console.error('Failed to update move with error status:', updateError);
+        }
+        
         return null;
     }
 };
