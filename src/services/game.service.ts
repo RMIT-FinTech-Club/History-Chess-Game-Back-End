@@ -67,8 +67,9 @@ export const saveMove = async (
     gameId: string, 
     move: string, 
     moveNumber: number,
-    fen: string  // Add FEN parameter
-) => {
+    fen: string,  // Add FEN parameter 
+    color: 'white' | 'black', 
+    playerId: string) => {
     await GameSession.updateOne(
         { gameId },
         { 
@@ -80,7 +81,9 @@ export const saveMove = async (
                     evaluation: 0,
                     bestmove: '',
                     mate: null,
-                    continuation: []
+                    continuation: '',
+                    color,
+                    playerId
                 } 
             } 
         }
@@ -90,17 +93,23 @@ export const saveMove = async (
 // Update game ressult
 export const saveGameResult = async (gameId: string, resultString: string) => {
     let result: GameResult = GameResult.inProgress;
+    let winner: string | null = null;
 
-    // Parse the result string to determine the game result
-    if (resultString.includes('White wins by checkmate') || resultString.includes('White wins by time') || resultString.includes('White wins by disconnect')) {
+    // Parse the result string to determine the game result and winner
+    if (resultString.includes('White wins')) {
         result = GameResult.whiteWins;
-    } else if (resultString.includes('Black wins by checkmate') || resultString.includes('Black wins by time') || resultString.includes('Black wins by disconnect')) {
+        const game = await GameSession.findOne({ gameId });
+        winner = game?.whitePlayerId || null;
+    } else if (resultString.includes('Black wins')) {
         result = GameResult.blackWins;
+        const game = await GameSession.findOne({ gameId });
+        winner = game?.blackPlayerId || null;
     } else if (resultString.includes('Draw')) {
         result = GameResult.draw;
+        winner = null;
     }
 
-    console.log(`Saving game result for ${gameId}: ${resultString} (${result})`);
+    console.log(`Saving game result for ${gameId}: ${resultString} (${result}). Winner: ${winner || 'Draw'}`);
 
     // Update game result in MongoDB database
     await GameSession.updateOne(
@@ -109,6 +118,7 @@ export const saveGameResult = async (gameId: string, resultString: string) => {
             $set: {
                 endTime: new Date(),
                 result,
+                winner,
                 status: GameStatus.finished
             }
         }

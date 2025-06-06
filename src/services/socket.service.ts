@@ -19,7 +19,9 @@ const gameSessions = new Map<string, GameSessionInterface>();
 
 const startTimer = (session: GameSessionInterface, io: SocketIOServer, fastify: FastifyInstance): void => {
     if (session.timer) clearInterval(session.timer);
-
+    console.log("Starting timer for gameId:", session.gameId);
+    console.log("Timer interval:", session.whiteTimeLeft);
+        
     session.timer = setInterval(() => {
         const isWhiteTurn: boolean = session.chess.turn() === "w";
         if (isWhiteTurn) {
@@ -110,21 +112,25 @@ export const handleMove = async (socket: Socket, io: SocketIOServer, fastify: Fa
     }
 
     try {
-      // Make the move in memory
-      session.chess.move(move);
-
-      // Save the move to the database
-      const moveNumber = session.chess.history().length;
-      const currentFen = session.chess.fen();
+        // Make the move in memory
+        session.chess.move(move);
+    
+        // Save the move to the database with player color and ID
+        const moveNumber = session.chess.history().length;
+        const color = isWhiteTurn ? 'white' : 'black';
+        const currentFen = session.chess.fen();
 
       // Save move with analysis (replaces saveMove)
       const analysisPromise = saveMoveWithAnalysis(gameId, move, moveNumber, currentFen);
-
-      // Broadcast the move to all players
-      io.to(gameId).emit('gameState', {
-          ...getGameState(session),
-          moveNumber,
-          move,
+    //   await saveMove(gameId, move, moveNumber, color, currentPlayerId);
+        
+        // Broadcast the move to all players
+        io.to(gameId).emit('gameState', {
+            ...getGameState(session),
+            moveNumber,
+            move,
+            color,
+            playerId: currentPlayerId,
           analyzing: true
       });
 
@@ -147,7 +153,7 @@ export const handleMove = async (socket: Socket, io: SocketIOServer, fastify: Fa
               analyzing: false,
               error: 'Analysis failed'
           });
-      });
+        });   
 
       // Check if the game is over
       if (session.chess.isGameOver()) {
