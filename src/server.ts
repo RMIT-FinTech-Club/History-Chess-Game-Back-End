@@ -1,186 +1,217 @@
-// backend/manual-realtime-server.ts (TypeScript with ES Modules)
 import Fastify, { FastifyInstance } from 'fastify';
-import { Server as SocketIOServer, Socket } from 'socket.io';
-import * as GameController from "./controllers/game.controller"
-import * as GameService from "./services/game.service";
 import fastifyCors from '@fastify/cors';
+import fastifyJwt from '@fastify/jwt';
+import fastifyOAuth2 from '@fastify/oauth2';
+import fastifyMultipart from '@fastify/multipart';
+import { Server as SocketIOServer, Socket } from 'socket.io';
+import { postgresPrisma } from './configs/prismaClient';
+import * as dotenv from 'dotenv';
 import neonPlugin from './plugins/neon';
 import mongodbPlugin from './plugins/mongodb';
 import websocketPlugin from './plugins/websocket';
 import prismaPlugin from './plugins/prisma';
-import gameRoutes from './routes/game.routes';
 import userRoutes from './routes/user.routes';
+import gameRoutes from './routes/game.routes';
+import * as GameController from './controllers/game.controller';
+import * as GameService from './services/game.service';
+import { PrismaClient } from '@prisma/client';
 
-const server = Fastify({
-    logger: true // Optional: Enable Fastify logger for debugging
-});
+//Define interface for Fastify decorators
+interface FastifyDecorators {
+  prisma: PrismaClient;
+}
 
-// Register Swagger plugins first
-server.register(import('@fastify/swagger'), {
-    swagger: {
-        info: {
-            title: 'Vietnamese History Chess Game API',
-            description: 'API documentation for the Chess Game backend service',
-            version: '1.0.0'
-        },
-        externalDocs: {
-            url: 'https://github.com/your-repo/History-Chess-Game-Back-End',
-            description: 'The remote repo for backend'
-        },
-        host: 'localhost:8000',
-        schemes: ['http'],
-        consumes: ['application/json'],
-        produces: ['application/json'],
-        tags: [
-            { name: 'game', description: 'Game related endpoints' },
-            { name: 'user', description: 'User profile related endpoints' },
-            {name: 'socket', description: 'Socket.IO events documentation'}
-        ],
-        securityDefinitions: {
-            bearerAuth: {
-                type: 'apiKey',
-                name: 'Authorization',
-                in: 'header'
-            }
-        },
-    }
-});
+dotenv.config();
 
-// Register Swagger UI
-server.register(import('@fastify/swagger-ui'), {
-    routePrefix: '/documentation',
-    uiConfig: {
-        docExpansion: 'list',
-        deepLinking: true
-    },
-    uiHooks: {
-        onRequest: function(request, reply, next){ next(); },
-        preHandler: function(request, reply, next){ next(); }
-    },
-    staticCSP: true,
-    transformStaticCSP: (header) => header,
-});
+const server: FastifyInstance = Fastify({ logger: true });
 
-server.register(mongodbPlugin)
-server.register(neonPlugin)
-server.register(websocketPlugin)
-server.register(prismaPlugin)
-server.register(gameRoutes)
-server.register(userRoutes, { prefix: '/api' })
-
+//Register CORS
 server.register(fastifyCors, {
-    origin: "http://localhost:3000", // Allow requests from your React frontend origin
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],         // Allowed HTTP methods
-    credentials: true,
-})
+  origin: 'http://localhost:3000',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+});
 
+//Register JWT
+server.register(fastifyJwt, {
+  secret: process.env.JWT_SECRET || 'your-secret-key',
+});
 
-let io: SocketIOServer; // Explicitly type 'io' as SocketIOServer
+//Register OAuth2 for Google
+server.register(fastifyOAuth2, {
+  name: 'googleOAuth2',
+  scope: ['profile', 'email'],
+  credentials: {
+    client: {
+      id: process.env.GOOGLE_CLIENT_ID!,
+      secret: process.env.GOOGLE_CLIENT_SECRET!,
+    },
+    auth: fastifyOAuth2.GOOGLE_CONFIGURATION,
+  },
+  startRedirectPath: '/users/google-auth',
+  callbackUri: 'http://localhost:8000/users/google-callback',
+});
 
-// server.ready(() => {
-//     // Create Socket.IO server, passing Fastify's HTTP server
-//     io = new SocketIOServer(server.server, {
-//         // Socket.IO options can be configured here if needed
-//     });
+//Register multipart for file uploads
+server.register(fastifyMultipart, {
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB
+  },
+});
 
-//     io.on('connection', (socket: Socket) => { // Explicitly type 'socket' as Socket
-//         server.log.info(`Socket connected: ${socket.id}`);
+//Register Swagger
+server.register(import('@fastify/swagger'), {
+  swagger: {
+    info: {
+      title: 'Vietnamese History Chess Game API',
+      description: 'API documentation for the Chess Game backend service',
+      version: '1.0.0',
+    },
+    externalDocs: {
+      url: 'https://github.com/your-repo/History-Chess-Game-Back-End',
+      description: 'The remote repo for backend',
+    },
+    host: 'localhost:8000',
+    schemes: ['http'],
+    consumes: ['application/json'],
+    produces: ['application/json'],
+    tags: [
+      { name: 'game', description: 'Game related endpoints' },
+      { name: 'user', description: 'User profile related endpoints' },
+      { name: 'socket', description: 'Socket.IO events documentation' },
+    ],
+    securityDefinitions: {
+      bearerAuth: {
+        type: 'apiKey',
+        name: 'Authorization',
+        in: 'header',
+      },
+    },
+  },
+});
 
-//         socket.on('messageFromClient', (data: string) => { // Type 'data' as string
-//             server.log.info(`Received message from client ${socket.id}: ${data}`);
+//Register Swagger UI
+server.register(import('@fastify/swagger-ui'), {
+  routePrefix: '/documentation',
+  uiConfig: {
+    docExpansion: 'list',
+    deepLinking: true,
+  },
+  uiHooks: {
+    onRequest: function (request, reply, next) { next(); },
+    preHandler: function (request, reply, next) { next(); },
+  },
+  staticCSP: true,
+  transformStaticCSP: (header) => header,
+});
 
-//             io.emit('messageFromServer', {
-//                 senderId: socket.id,
-//                 message: `Server received (manual - TypeScript ESM): ${data}`
-//             });
-//         });
+//Register plugins
+server.register(neonPlugin);
+server.register(mongodbPlugin);
+server.register(websocketPlugin);
+server.register(prismaPlugin);
 
-//         socket.on('disconnect', (reason: string) => { // Type 'reason' as string
-//             server.log.info(`Socket disconnected: ${socket.id} due to ${reason}`);
-//         });
+//Decorate server with Prisma client
+server.decorate('prisma', postgresPrisma);
 
-//         socket.emit('welcomeMessage', 'Welcome to the Chess Game Realtime Server (Manual - TypeScript ESM)!');
-//     });
-// });
+//Register routes
+server.register(userRoutes);
+server.register(gameRoutes);
+
+let io: SocketIOServer;
 
 server.ready(() => {
-    io = new SocketIOServer(server.server, {
-        cors: {
-            origin: "http://localhost:3000",
-            methods: ["GET", "POST", "PUT", "DELETE"]
-        }
+  io = new SocketIOServer(server.server, {
+    cors: {
+      origin: 'http://localhost:3000',
+      methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    },
+  });
+
+  server.log.info('Server is ready!');
+  server.log.info('All registered routes:');
+  server.log.info(server.printRoutes());
+
+  const matchmakingInterval = setInterval(() => {
+    if (io) {
+      GameService.checkWaitingPlayersForMatches(io);
+    }
+  }, 1000);
+
+  io.on('connection', (socket: Socket) => {
+    server.log.info(`Socket connected: ${socket.id}`);
+
+    // Keep messageFromClient handler commented out but intact
+    // socket.on('messageFromClient', (data: string) => {
+    //   server.log.info(`Received message from client ${socket.id}: ${data}`);
+    //   io.emit('messageFromServer', {
+    //     senderId: socket.id,
+    //     message: `Server received (manual - TypeScript ESM): ${data}`,
+    //   });
+    // });
+
+    socket.on('joinGame', (data: { elo: number }) => {
+      server.log.info(`\nPlayer ${socket.id} requesting to join game with data: ${JSON.stringify(data)}`);
+      GameController.handleJoinGame(socket, io, data.elo || 1200);
     });
-    
-    // Set up matching check
-    const matchmakingInterval = setInterval(() => {
-        if (io) {
-            GameService.checkWaitingPlayersForMatches(io);
-        }
-    }, 1000);
-    
-    io.on('connection', (socket: Socket) => {
-        server.log.info(`Socket connected: ${socket.id}`);
-        
-        socket.on('joinGame', (data: { elo: number }) => {
-            server.log.info(`\nPlayer ${socket.id} requesting to join game with data: ${JSON.stringify(data)}`);
-            const playerElo = data.elo || 1200;
-            GameController.handleJoinGame(socket, io, playerElo);
-        });
-        
-        socket.on('disconnect', (reason: string) => {
-            server.log.info(`Socket disconnected: ${socket.id} due to ${reason}`);
-            GameController.handleDisconnect(socket, reason);
-        });
-        
-        socket.emit('welcomeMessage', 'Welcome to the Chess Game Realtime Server!');
-        
-        
-        socket.on('makeMove', (data: { gameId: string, move: string }) => {
-            GameService.handleMove(socket, io, data.gameId, data.move);
-        });
+
+    socket.on('makeMove', (data: { gameId: string, move: string }) => {
+      GameService.handleMove(socket, io, data.gameId, data.move);
     });
+
+    socket.on('disconnect', (reason: string) => {
+      server.log.info(`Socket disconnected: ${socket.id} due to ${reason}`);
+      GameController.handleDisconnect(socket, reason);
+    });
+
+    socket.emit('welcomeMessage', 'Welcome to the Chess Game Realtime Server!');
+  });
 });
 
 server.get('/', async (request, reply) => {
-    return { hello: 'world from Fastify + Manual Socket.IO (TypeScript ESM)!' };
+  return { hello: 'world from Fastify + Manual Socket.IO (TypeScript ESM)!' };
 });
 
-// Check connection with MongoDB and Neon check route
 server.get('/health', async (request, reply) => {
-    try {
-        // Test MongoDB connection
-        // await server.mongo.connect.command({ ping: 2 });
-        
-        // Test Neon connection
-        await server.neon.query('SELECT 1');
-        
-        return {
-            status: 'ok',
-            mongodb: 'connected',
-            neon: 'connected'
-        };
-    } catch (error: any) {
-        reply.status(500).send({
-            status: 'error',
-            message: error.message,
-            details: process.env.NODE_ENV === 'development' ? error : undefined // Optionally include full error details in development
-        });
-    }
+  try {
+    await (server as any).neon.query('SELECT 1');
+    return {
+      status: 'ok',
+      mongodb: 'connected',
+      neon: 'connected',
+    };
+  } catch (error: any) {
+    reply.status(500).send({
+      status: 'error',
+      message: error.message,
+      details: process.env.NODE_ENV === 'development' ? error : undefined,
+    });
+  }
 });
 
 const start = async () => {
-    try {
-        await server.listen({ port: 8000 });
-        server.log.info(`Server listening on port ${8000}`);
-    } catch (err) {
-        server.log.error(err);
-        process.exit(1);
-    }
+  try {
+    await postgresPrisma.$connect();
+    server.log.info('Connected to NeonDB via Prisma');
+    await server.listen({ port: parseInt(process.env.PORT || '8000'), host: '0.0.0.0' });
+    server.log.info(`Server running on http://localhost:${process.env.PORT || '8000'}`);
+  } catch (err) {
+    server.log.error(err);
+    process.exit(1);
+  }
 };
+
+server.addHook('onClose', async () => {
+  await postgresPrisma.$disconnect();
+  server.log.info('Prisma connection closed');
+});
 
 start();
 
-
-
-
-
+// Extend Fastify instance interface
+declare module 'fastify' {
+  interface FastifyInstance {
+    prisma: PrismaClient;
+  }
+}

@@ -14,11 +14,11 @@ model users {
   hashedPassword String
   walletAddress  String?  @unique
   elo            Int      @default(400)
-  avatarUrl      String? // URL to the avatar image in AWS S3
+  avatarUrl      String?
   language       String   @default("en")
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
-  googleAuth    Boolean  @default(false)
+  googleAuth     Boolean  @default(false)
 
   ownedNFTs nfts[]
   games     games[]
