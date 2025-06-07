@@ -1,6 +1,6 @@
-import { FastifyInstance } from 'fastify';
+import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import UserController from '../controllers/user.controller';
-import { uploadController } from '../controllers/upload.controller';
+import { uploadController, AvatarRequest } from '../controllers/upload.controller';
 import {
   createUserSchema,
   getUserSchema,
@@ -66,10 +66,6 @@ export default async function userRoutes(fastify: FastifyInstance) {
     handler: userController.verifyResetCode.bind(userController),
   });
 
-  fastify.get('/users/google-auth', {
-    handler: userController.googleAuth.bind(userController),
-  });
-
   fastify.get('/users/google-callback', {
     handler: userController.googleCallback.bind(userController),
   });
@@ -84,10 +80,14 @@ export default async function userRoutes(fastify: FastifyInstance) {
 
   fastify.post('/users/:id/avatar', {
     schema: uploadAvatarSchema,
-    handler: uploadController.uploadAvatar.bind(uploadController),
+    handler: async (request: FastifyRequest<AvatarRequest>, reply: FastifyReply) => {
+      await uploadController.uploadAvatar(request, reply, fastify);
+    },
   });
 
   fastify.delete('/users/:id/avatar', {
-    handler: uploadController.deleteAvatar.bind(uploadController),
+    handler: async (request: FastifyRequest<AvatarRequest>, reply: FastifyReply) => {
+      await uploadController.deleteAvatar(request, reply, fastify);
+    },
   });
 }

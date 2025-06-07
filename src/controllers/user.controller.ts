@@ -49,7 +49,7 @@ interface VerifyResetCodeRequest {
 
 interface ProfileRequest extends RouteGenericInterface {
   Headers: { authorization?: string };
-  user?: { id: string; username: string };
+  user?: { id: string; username: string; googleAuth: boolean };
 }
 
 interface UpdateProfileRequest {
@@ -73,8 +73,10 @@ export default class UserController {
       reply.status(201).send(user);
     } catch (error: any) {
       request.log.error(error);
-      if (error.code === 'P2002') {
-        reply.status(409).send({ message: 'Username, email, or wallet address already exists' });
+      if (error.message.includes('username')) {
+        reply.status(409).send({ message: 'This username is already taken (case-insensitive). Please choose a different username.' });
+      } else if (error.message.includes('email')) {
+        reply.status(409).send({ message: 'This email is already registered. Please use a different email.' });
       } else {
         reply.status(500).send({ message: 'Internal server error' });
       }
@@ -149,8 +151,10 @@ export default class UserController {
       reply.status(200).send(updatedUser);
     } catch (error: any) {
       request.log.error(error);
-      if (error.code === 'P2002') {
-        reply.status(409).send({ message: 'Username, email, or wallet address already exists' });
+      if (error.message.includes('username')) {
+        reply.status(409).send({ message: 'This username is already taken (case-insensitive). Please choose a different username.' });
+      } else if (error.message.includes('email')) {
+        reply.status(409).send({ message: 'This email is already registered. Please use a different email.' });
       } else {
         reply.status(500).send({ message: 'Internal server error' });
       }
@@ -162,10 +166,10 @@ export default class UserController {
     reply: FastifyReply
   ): Promise<void> {
     const { id } = request.params;
-    const { username } = request.body;
+    const { username, avatarUrl } = request.body;
 
     try {
-      const updatedUser = await this.userService.updateProfile(id, { username });
+      const updatedUser = await this.userService.updateProfile(id, { username, avatarUrl });
 
       if (!updatedUser) {
         reply.status(404).send({ message: 'User not found' });
@@ -175,8 +179,8 @@ export default class UserController {
       reply.status(200).send(updatedUser);
     } catch (error: any) {
       request.log.error(error);
-      if (error.code === 'P2002') {
-        reply.status(409).send({ message: 'Username already exists' });
+      if (error.message.includes('Username already taken')) {
+        reply.status(409).send({ message: 'This username already exists, please choose another username.' });
       } else {
         reply.status(500).send({ message: 'Internal server error' });
       }
@@ -229,11 +233,7 @@ export default class UserController {
   ): Promise<void> {
     try {
       const { email, resetCode, newPassword } = request.body;
-      const { token } = await this.userService.resetPassword(
-        email,
-        resetCode,
-        newPassword
-      );
+      const { token } = await this.userService.resetPassword(email, resetCode, newPassword);
       const user = await this.userService.getUserByEmail(email);
       if (!user) {
         reply.status(404).send({ message: 'User not found' });

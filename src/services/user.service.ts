@@ -25,7 +25,7 @@ export interface UpdateUserInput {
 
 export interface UpdateProfileInput {
   username?: string;
-  avatarUrl?: string;
+  avatarUrl?: string | null | undefined; // Allow null
 }
 
 interface UserProfileResponse {
@@ -287,7 +287,7 @@ export class UserService {
       updateData.username = cleanUsername;
     }
 
-    if (data.avatarUrl !== undefined) updateData.avatarUrl = data.avatarUrl || null;
+    if (data.avatarUrl !== undefined) updateData.avatarUrl = data.avatarUrl; // Handles string, null, or undefined
 
     if (Object.keys(updateData).length === 0) {
       throw new Error('No valid updates provided');
@@ -299,8 +299,14 @@ export class UserService {
         data: updateData,
       });
 
+      // Generate new token with updated username
+      const newToken = this.generateToken(updatedUser.id, updatedUser.username, updatedUser.googleAuth);
+
       const { hashedPassword: _, ...userWithoutPassword } = updatedUser;
-      return userWithoutPassword;
+      return {
+        token: newToken,
+        ...userWithoutPassword,
+      };
     } catch (error) {
       return null;
     }
@@ -609,16 +615,16 @@ export class UserService {
       const token = this.generateToken(user.id, user.username, user.googleAuth);
       return {
         token,
-        data: { 
-          id: user.id, 
-          username: user.username, 
-          email: user.email, 
-          walletAddress: user.walletAddress, 
+        data: {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          walletAddress: user.walletAddress,
           avatarUrl: user.avatarUrl,
           language: user.language,
-          elo: user.elo, 
+          elo: user.elo,
           createdAt: user.createdAt,
-          updatedAt: user.updatedAt 
+          updatedAt: user.updatedAt,
         },
       };
     } catch (error: any) {

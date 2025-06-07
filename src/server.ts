@@ -16,16 +16,11 @@ import * as GameController from './controllers/game.controller';
 import * as GameService from './services/game.service';
 import { PrismaClient } from '@prisma/client';
 
-//Define interface for Fastify decorators
-interface FastifyDecorators {
-  prisma: PrismaClient;
-}
-
 dotenv.config();
 
 const server: FastifyInstance = Fastify({ logger: true });
 
-//Register CORS
+// Register CORS
 server.register(fastifyCors, {
   origin: 'http://localhost:3000',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
@@ -33,12 +28,12 @@ server.register(fastifyCors, {
   credentials: true,
 });
 
-//Register JWT
+// Register JWT
 server.register(fastifyJwt, {
   secret: process.env.JWT_SECRET || 'your-secret-key',
 });
 
-//Register OAuth2 for Google
+// Register OAuth2 for Google
 server.register(fastifyOAuth2, {
   name: 'googleOAuth2',
   scope: ['profile', 'email'],
@@ -50,17 +45,17 @@ server.register(fastifyOAuth2, {
     auth: fastifyOAuth2.GOOGLE_CONFIGURATION,
   },
   startRedirectPath: '/users/google-auth',
-  callbackUri: 'http://localhost:8000/users/google-callback',
+  callbackUri: 'http://localhost:8080/users/google-callback',
 });
 
-//Register multipart for file uploads
+// Register multipart for file uploads
 server.register(fastifyMultipart, {
   limits: {
     fileSize: 5 * 1024 * 1024, // 5MB
   },
 });
 
-//Register Swagger
+// Register Swagger
 server.register(import('@fastify/swagger'), {
   swagger: {
     info: {
@@ -72,7 +67,7 @@ server.register(import('@fastify/swagger'), {
       url: 'https://github.com/your-repo/History-Chess-Game-Back-End',
       description: 'The remote repo for backend',
     },
-    host: 'localhost:8000',
+    host: 'localhost:8080',
     schemes: ['http'],
     consumes: ['application/json'],
     produces: ['application/json'],
@@ -91,7 +86,7 @@ server.register(import('@fastify/swagger'), {
   },
 });
 
-//Register Swagger UI
+// Register Swagger UI
 server.register(import('@fastify/swagger-ui'), {
   routePrefix: '/documentation',
   uiConfig: {
@@ -106,16 +101,13 @@ server.register(import('@fastify/swagger-ui'), {
   transformStaticCSP: (header) => header,
 });
 
-//Register plugins
+// Register plugins
 server.register(neonPlugin);
 server.register(mongodbPlugin);
 server.register(websocketPlugin);
 server.register(prismaPlugin);
 
-//Decorate server with Prisma client
-server.decorate('prisma', postgresPrisma);
-
-//Register routes
+// Register routes
 server.register(userRoutes);
 server.register(gameRoutes);
 
@@ -141,7 +133,7 @@ server.ready(() => {
 
   io.on('connection', (socket: Socket) => {
     server.log.info(`Socket connected: ${socket.id}`);
-
+    
     // Keep messageFromClient handler commented out but intact
     // socket.on('messageFromClient', (data: string) => {
     //   server.log.info(`Received message from client ${socket.id}: ${data}`);
@@ -194,8 +186,8 @@ const start = async () => {
   try {
     await postgresPrisma.$connect();
     server.log.info('Connected to NeonDB via Prisma');
-    await server.listen({ port: parseInt(process.env.PORT || '8000'), host: '0.0.0.0' });
-    server.log.info(`Server running on http://localhost:${process.env.PORT || '8000'}`);
+    await server.listen({ port: 8080, host: '0.0.0.0' });
+    server.log.info(`Server running on http://localhost:8080`);
   } catch (err) {
     server.log.error(err);
     process.exit(1);

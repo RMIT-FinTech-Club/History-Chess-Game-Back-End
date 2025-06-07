@@ -1,132 +1,149 @@
-import { FastifyRequest, FastifyReply } from 'fastify';
-import { PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
-import { v4 as uuidv4 } from 'uuid';
-import { s3Client, bucketName } from '../configs/aws';
+import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { UserService } from '../services/user.service';
+import { v4 as uuidv4 } from 'uuid';
+
+export interface AvatarRequest {
+  Params: { id: string };
+  Headers: { authorization?: string };
+  user?: { id: string; username: string; googleAuth: boolean };
+}
 
 export const uploadController = {
   async uploadAvatar(
-    request: FastifyRequest<{ Params: { id: string } }>,
-    reply: FastifyReply
-  ) {
-    const userService = new UserService(request.server);
-    const requestTimeout = setTimeout(() => {
-      request.log.error('Avatar upload timed out');
-      reply.status(504).send({ message: 'Request timed out' });
-    }, 25000);
-
+    request: FastifyRequest<AvatarRequest>,
+    reply: FastifyReply,
+    fastify: FastifyInstance
+  ): Promise<void> {
     try {
-      const { id } = request.params;
-      const user = await userService.getUserById(id);
-
-      if (!user) {
-        clearTimeout(requestTimeout);
-        return reply.code(404).send({ message: 'User not found' });
+      const userId = request.user?.id;
+      if (!userId || userId !== request.params.id) {
+        reply.status(401).send({ message: 'Unauthorized' });
+        return;
       }
 
       const data = await request.file();
       if (!data) {
-        clearTimeout(requestTimeout);
-        return reply.code(400).send({ message: 'No file uploaded' });
+        reply.status(400).send({ message: 'No file uploaded' });
+        return;
       }
 
-      const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp', 'image/svg+xml'];
-      if (!allowedTypes.includes(data.mimetype)) {
-        clearTimeout(requestTimeout);
-        return reply.code(400).send({
-          message: 'Invalid file type. Only JPEG, PNG, JPG, WebP, and SVG formats are allowed.'
-        });
+      const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml'];
+      if (!validTypes.includes(data.mimetype)) {
+        reply.status(400).send({ message: 'Invalid file type. Only JPEG, PNG, WEBP, or SVG allowed.' });
+        return;
       }
 
-      const buffer = await data.toBuffer();
-      const maxSize = 5 * 1024 * 1024;
-      if (buffer.length > maxSize) {
-        clearTimeout(requestTimeout);
-        return reply.code(400).send({ message: 'File too large. Maximum size is 5MB.' });
+      if (data.file.bytesRead > 5 * 1024 * 1024) {
+        reply.status(400).send({ message: 'File size exceeds 5MB limit' });
+        return;
       }
 
-      const fileExtension = data.filename.split('.').pop() || 'jpg';
-      const key = `avatars/${uuidv4()}.${fileExtension}`;
+      const s3Client = new S3Client({
+        region: process.env.AWS_REGION || 'ap-southeast-2',
+        credentials: {
+          accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
+          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
+        },
+      });
+
+      const userService = new UserService(fastify);
+      const user = await userService.getUserById(userId);
+      if (!user) {
+        reply.status(404).send({ message: 'User not found' });
+        return;
+      }
 
       if (user.avatarUrl) {
-        try {
-          const oldKey = user.avatarUrl.split('/').slice(-2).join('/');
+        const oldKey = user.avatarUrl.split('/').pop();
+        if (oldKey) {
           await s3Client.send(new DeleteObjectCommand({
-            Bucket: bucketName,
-            Key: oldKey,
+            Bucket: process.env.AWS_S3_BUCKET_NAME || 'fintech-club-vietnamese-historical-chess-game',
+            Key: `avatars/${oldKey}`,
           }));
-          request.log.info(`Deleted old avatar: ${oldKey}`);
-        } catch (error) {
-          request.log.error(`Failed to delete old avatar: ${error}`);
+          request.log.info(`Deleted old avatar: avatars/${oldKey}`);
         }
       }
 
-      await s3Client.send(new PutObjectCommand({
-        Bucket: bucketName,
-        Key: key,
-        Body: buffer,
-        ContentType: data.mimetype,
-      }));
+      const fileExtension = data.mimetype.split('/')[1];
+      const fileName = `${uuidv4()}.${fileExtension}`;
+      const fileBuffer = await data.toBuffer();
 
-      const avatarUrl = `https://${bucketName}.s3.${process.env.AWS_REGION || 'ap-southeast-1'}.amazonaws.com/${key}`;
-      const updatedUser = await userService.updateProfile(id, { avatarUrl });
+      await s3Client.send(new PutObjectCommand({
+        Bucket: process.env.AWS_S3_BUCKET_NAME || 'fintech-club-vietnamese-historical-chess-game',
+        Key: `avatars/${fileName}`,
+        Body: fileBuffer,
+        ContentType: data.mimetype,
+        ACL: 'public-read', // Ensure public access
+      }));
+      request.log.info(`Uploaded avatar: avatars/${fileName} with ACL: public-read`);
+
+      const avatarUrl = `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/avatars/${fileName}`;
+      request.log.info(`Generated avatar URL: ${avatarUrl}`);
+
+      const updatedUser = await userService.updateProfile(userId, { avatarUrl });
 
       if (!updatedUser) {
-        clearTimeout(requestTimeout);
-        return reply.code(404).send({ message: 'Failed to update user with new avatar' });
+        reply.status(404).send({ message: 'User not found' });
+        return;
       }
 
-      clearTimeout(requestTimeout);
-      return reply.code(200).send({
-        message: 'Avatar uploaded successfully',
-        avatarUrl,
-        user: updatedUser,
-      });
-    } catch (error) {
-      clearTimeout(requestTimeout);
-      request.log.error(error);
-      return reply.code(500).send({
-        message: 'Failed to upload avatar',
-        error: (error instanceof Error) ? error.message : 'Unknown error',
-      });
+      reply.status(200).send({ avatarUrl, user: updatedUser });
+    } catch (error: any) {
+      request.log.error(`Upload error: ${error.message}`);
+      reply.status(500).send({ message: 'Internal server error' });
     }
   },
 
   async deleteAvatar(
-    request: FastifyRequest<{ Params: { id: string } }>,
-    reply: FastifyReply
-  ) {
-    const userService = new UserService(request.server);
+    request: FastifyRequest<AvatarRequest>,
+    reply: FastifyReply,
+    fastify: FastifyInstance
+  ): Promise<void> {
     try {
-      const { id } = request.params;
-      const user = await userService.getUserById(id);
+      const userId = request.user?.id;
+      if (!userId || userId !== request.params.id) {
+        reply.status(401).send({ message: 'Unauthorized' });
+        return;
+      }
 
+      const userService = new UserService(fastify);
+      const user = await userService.getUserById(userId);
       if (!user) {
-        return reply.code(404).send({ message: 'User not found' });
+        reply.status(404).send({ message: 'User not found' });
+        return;
       }
 
-      if (!user.avatarUrl) {
-        return reply.code(400).send({ message: 'User does not have an avatar' });
+      if (user.avatarUrl) {
+        const oldKey = user.avatarUrl.split('/').pop();
+        if (oldKey) {
+          const s3Client = new S3Client({
+            region: process.env.AWS_REGION || 'ap-southeast-2',
+            credentials: {
+              accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
+              secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
+            },
+          });
+
+          await s3Client.send(new DeleteObjectCommand({
+            Bucket: process.env.AWS_S3_BUCKET_NAME || 'fintech-club-vietnamese-historical-chess-game',
+            Key: `avatars/${oldKey}`,
+          }));
+          request.log.info(`Deleted avatar: avatars/${oldKey}`);
+        }
       }
 
-      const key = user.avatarUrl.split('/').slice(-2).join('/');
-      await s3Client.send(new DeleteObjectCommand({
-        Bucket: bucketName,
-        Key: key,
-      }));
+      const updatedUser = await userService.updateProfile(userId, { avatarUrl: null });
 
-      const updatedUser = await userService.updateProfile(id, { avatarUrl: "" });
+      if (!updatedUser) {
+        reply.status(404).send({ message: 'User not found' });
+        return;
+      }
 
-      return reply.code(200).send({
-        message: 'Avatar deleted successfully',
-        user: updatedUser,
-      });
-    } catch (error) {
-      request.log.error(error);
-      return reply.code(500).send({
-        message: 'Failed to delete avatar',
-        error: (error instanceof Error) ? error.message : 'Unknown error',
-      });
+      reply.status(200).send({ message: 'Avatar deleted successfully', user: updatedUser });
+    } catch (error: any) {
+      request.log.error(`Delete avatar error: ${error.message}`);
+      reply.status(500).send({ message: 'Internal server error' });
     }
   },
 };
