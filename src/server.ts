@@ -1,5 +1,6 @@
 // backend/manual-realtime-server.ts (TypeScript with ES Modules)
 import Fastify, { FastifyInstance } from 'fastify';
+import fastifyMultipart from '@fastify/multipart';
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import * as GameController from "./controllers/game.controller"
 import * as GameService from "./services/game.service";
@@ -46,6 +47,12 @@ server.register(import('@fastify/swagger'), {
     }
 });
 
+server.register(fastifyMultipart, {
+    limits: {
+        fileSize: 5 * 1024 * 1024, // 5MB file size limit
+    }
+});
+
 // Register Swagger UI
 server.register(import('@fastify/swagger-ui'), {
     routePrefix: '/documentation',
@@ -66,7 +73,9 @@ server.register(neonPlugin)
 server.register(websocketPlugin)
 server.register(prismaPlugin)
 server.register(gameRoutes)
-server.register(userRoutes, { prefix: '/api' })
+// server.register(userRoutes, { prefix: '/api' })
+server.register(userRoutes)
+console.log("User routes registered");
 
 server.register(fastifyCors, {
     origin: "http://localhost:3000", // Allow requests from your React frontend origin
@@ -110,6 +119,10 @@ server.ready(() => {
             methods: ["GET", "POST", "PUT", "DELETE"]
         }
     });
+
+    console.log("Server is ready!");
+    console.log("All registered routes:");
+    console.log(server.printRoutes());
     
     // Set up matching check
     const matchmakingInterval = setInterval(() => {
@@ -152,7 +165,7 @@ server.get('/health', async (request, reply) => {
         // await server.mongo.connect.command({ ping: 2 });
         
         // Test Neon connection
-        await server.neon.query('SELECT 1');
+        await (server as any).neon.query('SELECT 1');
         
         return {
             status: 'ok',

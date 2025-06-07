@@ -17,6 +17,16 @@ export interface UpdateUserInput {
     walletAddress?: string;
 }
 
+export interface UpdateProfileInput {
+    username?: string;
+    email?: string;
+    password?: string;
+    walletAddress?: string;
+    language?: string;
+    avatarUrl?: string;
+}
+
+
 // Utility function to hash passwords
 const hashPassword = (password: string): string => {
     return crypto.createHash('sha256').update(password).digest('hex');
@@ -106,6 +116,38 @@ export const userService = {
                 data: updateData,
             });
             
+            // Remove the hashed password from the response
+            const { hashedPassword: _, ...userWithoutPassword } = updatedUser;
+            return userWithoutPassword;
+        } catch (error) {
+            // User not found or unique constraint violation
+            return null;
+        }
+    },
+
+    async updateProfile(id: string, data: UpdateProfileInput) {
+        // Prepare the update data
+        const updateData: any = {};
+
+        // Only update fields that are provided
+        if (data.username) updateData.username = data.username;
+        if (data.email) updateData.email = data.email;
+        if (data.password) updateData.hashedPassword = hashPassword(data.password);
+        if (data.walletAddress !== undefined) updateData.walletAddress = data.walletAddress;
+        if (data.language) {
+            // Validate language is either 'en' or 'vi'
+            if (data.language === 'en' || data.language === 'vi') {
+                updateData.language = data.language;
+            }
+        }
+        if (data.avatarUrl !== undefined) updateData.avatarUrl = data.avatarUrl;
+
+        try {
+            const updatedUser = await prisma.users.update({
+                where: { id },
+                data: updateData,
+            });
+
             // Remove the hashed password from the response
             const { hashedPassword: _, ...userWithoutPassword } = updatedUser;
             return userWithoutPassword;

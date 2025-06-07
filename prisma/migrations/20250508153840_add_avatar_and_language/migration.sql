@@ -1,0 +1,2 @@
+ALTER TABLE "users" ADD COLUMN "avatarUrl" TEXT;
+ALTER TABLE "users" ADD COLUMN "language" TEXT NOT NULL DEFAULT 'en';

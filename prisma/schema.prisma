@@ -8,18 +8,20 @@ datasource db {
 }
 
 model users {
-  id             String    @unique @default(uuid())
-  username       String    @unique
-  email          String    @unique
+  id             String   @unique @default(uuid())
+  username       String   @unique
+  email          String   @unique
   hashedPassword String
   walletAddress  String?  @unique
   elo            Int      @default(400)
+  avatarUrl      String? // URL to the avatar image in AWS S3
+  language       String   @default("en")
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   googleAuth    Boolean  @default(false)
 
   ownedNFTs nfts[]
-  games games[]
+  games     games[]
 }
 
 model nfts {
@@ -32,9 +34,9 @@ model nfts {
 }
 
 model games {
-  id             String   @unique @default(uuid())
-  userId         String
-  user           users    @relation(fields: [userId], references: [id])
-  createdAt      DateTime @default(now())
-  status         String   @default("active")
+  id        String   @unique @default(uuid())
+  userId    String
+  user      users    @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+  status    String   @default("active")
 }
