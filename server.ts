@@ -1,20 +1,29 @@
 import Fastify, { FastifyInstance } from 'fastify';
+import fastifyCors from '@fastify/cors';
+import fastifyJwt from '@fastify/jwt';
+import fastifyOAuth2 from '@fastify/oauth2';
+import fastifyMultipart from '@fastify/multipart';
 import { postgresPrisma } from './src/configs/prismaClient';
 import * as dotenv from 'dotenv';
+import neonPlugin from './src/plugins/neon';
+import userRoutes from './src/routes/users.router';
 
 dotenv.config();
 
 const fastify: FastifyInstance = Fastify({ logger: true });
 
-fastify.register(require('@fastify/cors'), {
+fastify.register(fastifyCors, {
   origin: 'http://localhost:3000',
   methods: ['GET', 'POST', 'PUT'],
   allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
 });
 
-fastify.register(require('@fastify/multipart'));
+fastify.register(fastifyJwt, {
+  secret: process.env.JWT_SECRET || 'your-secret-key',
+});
 
-fastify.register(require('@fastify/oauth2'), {
+fastify.register(fastifyOAuth2, {
   name: 'googleOAuth2',
   scope: ['profile', 'email'],
   credentials: {
@@ -22,15 +31,21 @@ fastify.register(require('@fastify/oauth2'), {
       id: process.env.GOOGLE_CLIENT_ID!,
       secret: process.env.GOOGLE_CLIENT_SECRET!,
     },
-    auth: require('@fastify/oauth2').GOOGLE_CONFIGURATION,
+    auth: fastifyOAuth2.GOOGLE_CONFIGURATION,
   },
   startRedirectPath: '/users/google-auth',
   callbackUri: 'http://localhost:8080/users/google-callback',
 });
 
-fastify.register(require('./src/plugins/neon'));
+fastify.register(fastifyMultipart, {
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB
+  },
+});
+
+fastify.register(neonPlugin);
 fastify.decorate('prisma', { postgres: postgresPrisma });
-fastify.register(require('./src/routes/users.router'), { prefix: '/users' });
+fastify.register(userRoutes, { prefix: '/users' });
 
 const start = async (): Promise<void> => {
   try {

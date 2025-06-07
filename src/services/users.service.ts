@@ -12,13 +12,18 @@ interface UserProfileResponse {
   email: string;
   walletAddress: string | null;
   elo: number;
+  avatarUrl: string | null;
+  language: string;
   createdAt: Date;
+  updatedAt: Date;
 }
 
 interface ResetCodeEntry {
   code: string;
   expires: number;
 }
+
+const DEFAULT_AVATAR_URL = 'https://source.unsplash.com/random/200x200?avatar';
 
 class UsersService {
   private jwtSecret: string;
@@ -154,12 +159,24 @@ class UsersService {
         hashedPassword,
         email: cleanEmail,
         googleAuth: false,
+        language: 'en',
+        avatarUrl: DEFAULT_AVATAR_URL,
       },
     });
     const token = this.generateToken(user.id, user.username, user.googleAuth);
     return {
       token,
-      data: { id: user.id, username: user.username, email: user.email, walletAddress: user.walletAddress, elo: user.elo, createdAt: user.createdAt },
+      data: { 
+        id: user.id, 
+        username: user.username, 
+        email: user.email, 
+        walletAddress: user.walletAddress, 
+        elo: user.elo, 
+        avatarUrl: user.avatarUrl,
+        language: user.language,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt
+      },
     };
   }
 
@@ -202,7 +219,17 @@ class UsersService {
     const token = this.generateToken(user.id, user.username, user.googleAuth);
     return {
       token,
-      data: { id: user.id, username: user.username, email: user.email, walletAddress: user.walletAddress, elo: user.elo, createdAt: user.createdAt },
+      data: { 
+        id: user.id, 
+        username: user.username, 
+        email: user.email, 
+        walletAddress: user.walletAddress, 
+        elo: user.elo, 
+        avatarUrl: user.avatarUrl,
+        language: user.language,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt
+      },
     };
   }
 
@@ -235,7 +262,17 @@ class UsersService {
       },
     });
     if (!user) throw new Error('User not found');
-    return { id: user.id, username: user.username, email: user.email, walletAddress: user.walletAddress, elo: user.elo, createdAt: user.createdAt };
+    return { 
+      id: user.id, 
+      username: user.username, 
+      email: user.email, 
+      walletAddress: user.walletAddress, 
+      elo: user.elo, 
+      avatarUrl: user.avatarUrl,
+      language: user.language,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt
+    };
   }
 
   async getUserByEmail(email: string): Promise<UserProfileResponse> {
@@ -244,7 +281,17 @@ class UsersService {
       where: { email: cleanEmail },
     });
     if (!user) throw new Error('User not found');
-    return { id: user.id, username: user.username, email: user.email, walletAddress: user.walletAddress, elo: user.elo, createdAt: user.createdAt };
+    return { 
+      id: user.id, 
+      username: user.username, 
+      email: user.email, 
+      walletAddress: user.walletAddress, 
+      elo: user.elo, 
+      avatarUrl: user.avatarUrl,
+      language: user.language,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt
+    };
   }
 
   async requestPasswordReset(email: string): Promise<void> {
@@ -327,7 +374,7 @@ class UsersService {
     const hashedPassword = await bcrypt.hash(cleanNewPassword, 10);
     await postgresPrisma.users.update({
       where: { email: cleanEmail },
-      data: { hashedPassword },
+      data: { hashedPassword, updatedAt: new Date() },
     });
 
     this.resetCodes.delete(cleanEmail);
@@ -368,13 +415,13 @@ class UsersService {
     const hashedPassword = await bcrypt.hash(cleanNewPassword, 10);
     await postgresPrisma.users.update({
       where: { id: userId },
-      data: { hashedPassword },
+      data: { hashedPassword, updatedAt: new Date() },
     });
   }
 
   async updateProfile(
     userId: string,
-    updates: { username?: string; email?: string; walletAddress?: string; avatar?: string }
+    updates: { username?: string; avatarUrl?: string }
   ): Promise<void> {
     if (!validator.isUUID(userId)) {
       this.logger.error(`Invalid user ID: ${userId}`);
@@ -387,7 +434,7 @@ class UsersService {
       throw new Error('User not found');
     }
 
-    const data: any = {};
+    const data: any = { updatedAt: new Date() };
 
     if (updates.username && updates.username !== user.username) {
       const cleanUsername = this.validateUsername(updates.username);
@@ -403,29 +450,16 @@ class UsersService {
       data.username = cleanUsername;
     }
 
-    if (updates.email && updates.email !== user.email) {
-      const cleanEmail = this.validateEmail(updates.email);
-      const existingEmail = await postgresPrisma.users.findFirst({
-        where: { email: cleanEmail, id: { not: userId } },
-      });
-      if (existingEmail) {
-        throw new Error('Email already registered');
+    if (updates.avatarUrl) {
+      if (!validator.isURL(updates.avatarUrl)) {
+        throw new Error('Avatar URL must be a valid URL');
       }
-      data.email = cleanEmail;
+      data.avatarUrl = updates.avatarUrl;
+    } else if (!user.avatarUrl) {
+      data.avatarUrl = DEFAULT_AVATAR_URL;
     }
 
-    if (updates.walletAddress !== undefined) {
-      data.walletAddress = updates.walletAddress || null;
-    }
-
-    if (updates.avatar) {
-      if (!validator.isURL(updates.avatar)) {
-        throw new Error('Avatar must be a valid URL');
-      }
-      data.avatar = updates.avatar;
-    }
-
-    if (Object.keys(data).length === 0) {
+    if (Object.keys(data).length === 1) {
       throw new Error('No valid updates provided');
     }
 
@@ -479,12 +513,14 @@ class UsersService {
             email: existingUser.email,
             walletAddress: existingUser.walletAddress,
             elo: existingUser.elo,
+            avatarUrl: existingUser.avatarUrl,
+            language: existingUser.language,
             createdAt: existingUser.createdAt,
+            updatedAt: existingUser.updatedAt,
           },
         };
       }
 
-      // Generate temporary token for username selection
       const tempToken = jwt.sign({ email }, this.jwtSecret, { expiresIn: '10m' });
       return { email, tempToken };
     } catch (error: any) {
@@ -499,14 +535,12 @@ class UsersService {
       const email = this.validateEmail(decoded.email);
       const cleanUsername = this.validateUsername(username);
 
-      // Verify email not taken (race condition check)
       const existingUser = await postgresPrisma.users.findUnique({ where: { email } });
       if (existingUser) {
         this.logger.info(`Email already registered during Google login completion: ${email}`);
         throw new Error('This email has been used already for a standard account. Please use a different Google account.');
       }
 
-      // Verify username not taken
       const existingUsername = await postgresPrisma.users.findFirst({
         where: { username: { equals: cleanUsername, mode: 'insensitive' } },
       });
@@ -515,7 +549,6 @@ class UsersService {
         throw new Error('Username already taken');
       }
 
-      // Create new user
       const randomPassword = Math.random().toString(36).slice(-12);
       const hashedPassword = await bcrypt.hash(randomPassword, 10);
       const user = await postgresPrisma.users.create({
@@ -524,6 +557,8 @@ class UsersService {
           email,
           hashedPassword,
           googleAuth: true,
+          language: 'en',
+          avatarUrl: DEFAULT_AVATAR_URL,
         },
       });
 
@@ -531,7 +566,17 @@ class UsersService {
       const token = this.generateToken(user.id, user.username, user.googleAuth);
       return {
         token,
-        data: { id: user.id, username: user.username, email: user.email, walletAddress: user.walletAddress, elo: user.elo, createdAt: user.createdAt },
+        data: { 
+          id: user.id, 
+          username: user.username, 
+          email: user.email, 
+          walletAddress: user.walletAddress, 
+          elo: user.elo, 
+          avatarUrl: user.avatarUrl,
+          language: user.language,
+          createdAt: user.createdAt,
+          updatedAt: user.updatedAt
+        },
       };
     } catch (error: any) {
       this.logger.error(`Google login completion error: ${error.message}, stack: ${error.stack}`);

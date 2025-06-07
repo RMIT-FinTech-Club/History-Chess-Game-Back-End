@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import UsersService from "../services/users.service";
-import type { Multipart } from '@fastify/multipart';
 import { ProfileRequest, GetUserByUsernameRequest, UpdatePasswordRequest, UpdateProfileRequest } from "../routes/users.router";
+import { postgresPrisma } from "../configs/prismaClient";
 
 interface RegisterRequest {
   Body: { username: string; email: string; password: string };
@@ -68,7 +68,7 @@ export default class UsersController {
       const { token, data } = await this.usersService.login(identifier, password);
       reply.status(200).send({ token, user: data });
     } catch (error: any) {
-      reply.status(401).send({ message: error.message });
+      reply.status(400).send({ message: error.message });
     }
   }
 
@@ -149,27 +149,52 @@ export default class UsersController {
   ): Promise<void> {
     try {
       const { id } = request.user!;
-      const parts = await request.parts();
-      const updates: { username?: string; email?: string; walletAddress?: string } = {};
+      const updates: { username?: string; avatarUrl?: string } = {};
 
-      for await (const part of parts) {
-        if (part.type === 'field') {
-          switch (part.fieldname) {
-            case 'username':
-              updates.username = part.value as string;
-              break;
-            case 'email':
-              updates.email = part.value as string;
-              break;
-            case 'walletAddress':
-              updates.walletAddress = part.value as string;
-              break;
+      // Process multipart form data
+      const fields = await new Promise<{ username?: string; avatarUrl?: any }>((resolve, reject) => {
+        const data: { username?: string; avatarUrl?: any } = {};
+        request.multipart(
+          (field, file, filename, encoding, mimetype) => {
+            if (field === 'username') {
+              let value = '';
+              file.on('data', (chunk) => (value += chunk.toString()));
+              file.on('end', () => {
+                data.username = value;
+              });
+            } else if (field === 'avatarUrl' && filename) {
+              // Simulate AWS S3 upload
+              data.avatarUrl = { filename, mimetype };
+            }
+          },
+          (err) => {
+            if (err) reject(err);
+            else resolve(data);
           }
-        }
+        );
+      });
+
+      if (fields.username) {
+        updates.username = fields.username;
+      }
+      if (fields.avatarUrl) {
+        updates.avatarUrl = `https://s3.amazonaws.com/your-bucket/${fields.avatarUrl.filename}`;
       }
 
       await this.usersService.updateProfile(id, updates);
-      reply.status(200).send({ message: "Profile updated successfully" });
+      const updatedUser = await postgresPrisma.users.findUnique({ where: { id } });
+      reply.status(200).send({ 
+        message: "Profile updated successfully",
+        user: {
+          id: updatedUser!.id,
+          username: updatedUser!.username,
+          email: updatedUser!.email,
+          avatarUrl: updatedUser!.avatarUrl,
+          language: updatedUser!.language,
+          createdAt: updatedUser!.createdAt,
+          updatedAt: updatedUser!.updatedAt,
+        }
+      });
     } catch (error: any) {
       reply.status(400).send({ message: error.message });
     }
@@ -183,7 +208,6 @@ export default class UsersController {
       const { code, state } = request.query;
       const result = await this.usersService.googleCallback(code, state);
       if ('email' in result) {
-        // New user, prompt for username
         reply.type('text/html').send(`
           <script>
             window.opener.postMessage({
@@ -195,7 +219,6 @@ export default class UsersController {
           </script>
         `);
       } else {
-        // Existing Google user, complete login
         reply.type('text/html').send(`
           <script>
             window.opener.postMessage({
@@ -203,7 +226,8 @@ export default class UsersController {
               token: '${result.token}',
               userId: '${result.data.id}',
               username: '${result.data.username}',
-              email: '${result.data.email}'
+              email: '${result.data.email}',
+              avatarUrl: '${result.data.avatarUrl || ''}'
             }, 'http://localhost:3000');
             window.close();
           </script>
