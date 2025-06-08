@@ -337,12 +337,11 @@ export class UserService {
     }
   }
 
-  async login(identifier: string, password: string): Promise<{ token: string; data: UserProfileResponse }> {
+  async login(identifier: string, password?: string, token?: string): Promise<{ token: string; data: UserProfileResponse }> {
     if (!identifier || typeof identifier !== 'string') {
       this.logger.warn(`Invalid identifier type: ${typeof identifier}`);
       throw new Error('Username or email must be a non-empty string');
     }
-    const cleanPassword = this.validatePassword(password);
 
     let cleanIdentifier: string;
     let isEmail = validator.isEmail(identifier);
@@ -365,17 +364,40 @@ export class UserService {
       throw new Error('User or email not found');
     }
     if (user.googleAuth) {
-      this.logger.warn(`Attempted password login for Google-authenticated user: ${cleanIdentifier}`);
+      this.logger.warn(`Attempted login for Google-authenticated user: ${cleanIdentifier}`);
       throw new Error('This account uses Google login. Please use Google to sign in.');
     }
-    const isMatch = await bcrypt.compare(cleanPassword, user.hashedPassword);
-    if (!isMatch) {
-      this.logger.warn(`Failed login attempt for ${cleanIdentifier}`);
-      throw new Error('Invalid password');
+
+    console.log(`Login attempt: identifier=${cleanIdentifier}, hasToken=${!!token}, hasPassword=${!!password}`);
+
+    if (token) {
+      // Token-based re-authentication
+      try {
+        const decoded = jwt.verify(token, this.jwtSecret) as UserTokenPayload;
+        if (decoded.id !== user.id || decoded.googleAuth !== user.googleAuth) {
+          this.logger.warn(`Invalid token for user: ${cleanIdentifier}`);
+          throw new Error('Invalid token');
+        }
+      } catch (error) {
+        this.logger.warn(`Token verification failed for login: ${cleanIdentifier}`);
+        throw new Error('Invalid or expired token');
+      }
+    } else if (password) {
+      // Password-based authentication
+      const cleanPassword = this.validatePassword(password);
+      const isMatch = await bcrypt.compare(cleanPassword, user.hashedPassword);
+      if (!isMatch) {
+        this.logger.warn(`Failed login attempt for ${cleanIdentifier}`);
+        throw new Error('Invalid password');
+      }
+    } else {
+      // Generate new token for valid user (fallback for missing token/password)
+      this.logger.info(`Generating new token for user: ${cleanIdentifier}`);
     }
-    const token = this.generateToken(user.id, user.username, user.googleAuth);
-    return {
-      token,
+
+    const newToken = this.generateToken(user.id, user.username, user.googleAuth);
+    const response = {
+      token: newToken,
       data: { 
         id: user.id, 
         username: user.username, 
@@ -388,6 +410,8 @@ export class UserService {
         updatedAt: user.updatedAt 
       },
     };
+    console.log('Login response:', response);
+    return response;
   }
 
   async verifyToken(token: string): Promise<{ id: string; username: string; googleAuth: boolean }> {
