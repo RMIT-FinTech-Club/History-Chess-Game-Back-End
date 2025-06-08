@@ -2,7 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
 import { FastifyInstance } from 'fastify';
 import validator from 'validator';
-import jwt from 'jsonwebtoken';
+import jwt, { JsonWebTokenError } from 'jsonwebtoken';
 import nodemailer from 'nodemailer';
 import { OAuth2Client } from 'google-auth-library';
 import * as crypto from 'crypto';
@@ -363,15 +363,11 @@ export class UserService {
       this.logger.warn(`Login attempt for non-existent user/email: ${cleanIdentifier}`);
       throw new Error('User or email not found');
     }
-    if (user.googleAuth) {
-      this.logger.warn(`Attempted login for Google-authenticated user: ${cleanIdentifier}`);
-      throw new Error('This account uses Google login. Please use Google to sign in.');
-    }
 
-    console.log(`Login attempt: identifier=${cleanIdentifier}, hasToken=${!!token}, hasPassword=${!!password}`);
+    console.log(`Login attempt: identifier=${cleanIdentifier}, hasToken=${!!token}, hasPassword=${!!password}, googleAuth=${user.googleAuth}`);
 
     if (token) {
-      // Token-based re-authentication
+      // Token-based re-authentication (for both Google and manual accounts)
       try {
         const decoded = jwt.verify(token, this.jwtSecret) as UserTokenPayload;
         if (decoded.id !== user.id || decoded.googleAuth !== user.googleAuth) {
@@ -382,17 +378,21 @@ export class UserService {
         this.logger.warn(`Token verification failed for login: ${cleanIdentifier}`);
         throw new Error('Invalid or expired token');
       }
-    } else if (password) {
-      // Password-based authentication
+    } else if (password && !user.googleAuth) {
+      // Password-based authentication (only for manual accounts)
       const cleanPassword = this.validatePassword(password);
       const isMatch = await bcrypt.compare(cleanPassword, user.hashedPassword);
       if (!isMatch) {
         this.logger.warn(`Failed login attempt for ${cleanIdentifier}`);
         throw new Error('Invalid password');
       }
+    } else if (!user.googleAuth) {
+      // Fallback for manual accounts without token/password
+      this.logger.info(`Generating new token for manual user: ${cleanIdentifier}`);
     } else {
-      // Generate new token for valid user (fallback for missing token/password)
-      this.logger.info(`Generating new token for user: ${cleanIdentifier}`);
+      // Block Google accounts without token
+      this.logger.warn(`Attempted login without token for Google-authenticated user: ${cleanIdentifier}`);
+      throw new Error('This account uses Google login. Please use Google to sign in or provide a valid token.');
     }
 
     const newToken = this.generateToken(user.id, user.username, user.googleAuth);
@@ -405,7 +405,7 @@ export class UserService {
         walletAddress: user.walletAddress, 
         avatarUrl: user.avatarUrl, 
         language: user.language,
-        elo: user.elo, 
+        elo: user.elo,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt 
       },
@@ -435,8 +435,9 @@ export class UserService {
         console.warn(`Username mismatch: token=${decoded.username}, db=${user.username}`);
       }
       return { id: decoded.id, username: decoded.username, googleAuth: decoded.googleAuth };
-    } catch (error) {
-      //this.logger.error(`Token verification failed: ${error.message}`);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`Token verification failed: ${errorMessage}`);
       throw new Error('Invalid token');
     }
   }
