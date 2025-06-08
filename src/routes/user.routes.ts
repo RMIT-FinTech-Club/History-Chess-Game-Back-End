@@ -80,6 +80,7 @@ export default async function userRoutes(fastify: FastifyInstance) {
 
   fastify.post('/users/:id/avatar', {
     schema: uploadAvatarSchema,
+    preHandler: authMiddleware, // Ensure token validation
     handler: async (request: FastifyRequest<AvatarRequest>, reply: FastifyReply) => {
       await uploadController.uploadAvatar(request, reply, fastify);
     },

@@ -25,7 +25,7 @@ export interface UpdateUserInput {
 
 export interface UpdateProfileInput {
   username?: string;
-  avatarUrl?: string | null | undefined; // Allow null
+  avatarUrl?: string | null | undefined;
 }
 
 interface UserProfileResponse {
@@ -44,6 +44,18 @@ interface ResetCodeEntry {
   code: string;
   expires: number;
 }
+
+interface UserTokenPayload {
+  id: string;
+  username: string;
+  googleAuth: boolean;
+}
+
+interface TempTokenPayload {
+  email: string;
+}
+
+type JWTPayload = UserTokenPayload | TempTokenPayload;
 
 export class UserService {
   private jwtSecret: string;
@@ -146,7 +158,7 @@ export class UserService {
       this.logger.error(`Invalid UUID for token generation: ${id}`);
       throw new Error('Internal error: invalid user ID');
     }
-    return jwt.sign({ id, username, googleAuth }, this.jwtSecret, { expiresIn: '1h', noTimestamp: true });
+    return jwt.sign({ id, username, googleAuth } as UserTokenPayload, this.jwtSecret, { expiresIn: '1h', noTimestamp: true });
   }
 
   async createUser(data: CreateUserInput) {
@@ -287,7 +299,7 @@ export class UserService {
       updateData.username = cleanUsername;
     }
 
-    if (data.avatarUrl !== undefined) updateData.avatarUrl = data.avatarUrl; // Handles string, null, or undefined
+    if (data.avatarUrl !== undefined) updateData.avatarUrl = data.avatarUrl;
 
     if (Object.keys(updateData).length === 0) {
       throw new Error('No valid updates provided');
@@ -299,8 +311,10 @@ export class UserService {
         data: updateData,
       });
 
-      // Generate new token with updated username
+      console.log('Updated user:', updatedUser);
+
       const newToken = this.generateToken(updatedUser.id, updatedUser.username, updatedUser.googleAuth);
+      console.log('Generated token in updateProfile:', newToken);
 
       const { hashedPassword: _, ...userWithoutPassword } = updatedUser;
       return {
@@ -382,14 +396,23 @@ export class UserService {
       throw new Error('Token must be a non-empty string (max 1024 chars)');
     }
     try {
-      const decoded = jwt.verify(token, this.jwtSecret) as { id: string; username: string; googleAuth: boolean; exp?: number };
+      const decoded = jwt.verify(token, this.jwtSecret) as JWTPayload;
+      if ('email' in decoded) {
+        throw new Error('Invalid token type');
+      }
       if (!decoded.id || !decoded.username) throw new Error('Invalid token payload');
       const user = await prisma.users.findUnique({ where: { id: decoded.id } });
-      if (!user || user.username !== decoded.username || user.googleAuth !== decoded.googleAuth) {
+      console.log('Decoded token:', decoded);
+      console.log('Database user:', user);
+      if (!user || user.googleAuth !== decoded.googleAuth) {
         throw new Error('User not found or token mismatch');
+      }
+      if (user.username !== decoded.username) {
+        console.warn(`Username mismatch: token=${decoded.username}, db=${user.username}`);
       }
       return { id: decoded.id, username: decoded.username, googleAuth: decoded.googleAuth };
     } catch (error) {
+      //this.logger.error(`Token verification failed: ${error.message}`);
       throw new Error('Invalid token');
     }
   }
@@ -571,7 +594,8 @@ export class UserService {
         };
       }
 
-      const tempToken = jwt.sign({ email }, this.jwtSecret, { expiresIn: '10m' });
+      const tempToken = jwt.sign({ email } as TempTokenPayload, this.jwtSecret, { expiresIn: '10m' });
+      console.log('Generated tempToken:', tempToken);
       return { email, tempToken };
     } catch (error: any) {
       this.logger.error(`Google callback error: ${error.message}, stack: ${error.stack}`);
@@ -581,7 +605,8 @@ export class UserService {
 
   async completeGoogleLogin(tempToken: string, username: string): Promise<{ token: string; data: UserProfileResponse }> {
     try {
-      const decoded = jwt.verify(tempToken, this.jwtSecret) as { email: string };
+      const decoded = jwt.verify(tempToken, this.jwtSecret) as TempTokenPayload;
+      console.log('Verified tempToken:', decoded);
       const email = this.validateEmail(decoded.email);
       const cleanUsername = this.validateUsername(username);
 

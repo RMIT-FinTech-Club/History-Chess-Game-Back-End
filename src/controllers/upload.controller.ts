@@ -16,8 +16,10 @@ export const uploadController = {
     fastify: FastifyInstance
   ): Promise<void> {
     try {
-      const userId = request.user?.id;
+      const userId = (request.user as { id: string; username: string; googleAuth: boolean })?.id;
+      request.log.info(`Avatar upload attempt: userId=${userId}, params.id=${request.params.id}, user=${JSON.stringify(request.user)}, authHeader=${request.headers.authorization}`);
       if (!userId || userId !== request.params.id) {
+        request.log.warn(`Unauthorized avatar upload: userId=${userId}, params.id=${request.params.id}`);
         reply.status(401).send({ message: 'Unauthorized' });
         return;
       }
@@ -74,9 +76,8 @@ export const uploadController = {
         Key: `avatars/${fileName}`,
         Body: fileBuffer,
         ContentType: data.mimetype,
-        ACL: 'public-read', // Ensure public access
       }));
-      request.log.info(`Uploaded avatar: avatars/${fileName} with ACL: public-read`);
+      request.log.info(`Uploaded avatar: avatars/${fileName} via bucket policy`);
 
       const avatarUrl = `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/avatars/${fileName}`;
       request.log.info(`Generated avatar URL: ${avatarUrl}`);
@@ -90,8 +91,10 @@ export const uploadController = {
 
       reply.status(200).send({ avatarUrl, user: updatedUser });
     } catch (error: any) {
-      request.log.error(`Upload error: ${error.message}`);
-      reply.status(500).send({ message: 'Internal server error' });
+      request.log.error(`S3 upload error: ${error.message}, code=${error.code}, requestId=${error.requestId}`);
+      reply.status(500).send({ 
+        message: `S3 upload failed: ${error.message || 'Unknown error'}` 
+      });
     }
   },
 
@@ -101,8 +104,10 @@ export const uploadController = {
     fastify: FastifyInstance
   ): Promise<void> {
     try {
-      const userId = request.user?.id;
+      const userId = (request.user as { id: string; username: string; googleAuth: boolean })?.id;
+      request.log.info(`Avatar delete attempt: userId=${userId}, params.id=${request.params.id}, user=${JSON.stringify(request.user)}, authHeader=${request.headers.authorization}`);
       if (!userId || userId !== request.params.id) {
+        request.log.warn(`Unauthorized avatar delete: userId=${userId}, params.id=${request.params.id}`);
         reply.status(401).send({ message: 'Unauthorized' });
         return;
       }
