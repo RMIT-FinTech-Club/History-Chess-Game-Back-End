@@ -3,21 +3,12 @@ import { Chess } from "chess.js"
 import fastify, { FastifyInstance } from "fastify"
 import { GameSession, IGameSession } from "../models/GameSession"
 import { GameStatus } from '../types/enum'
+import { InMemoryGameSession } from '../types/game.types';
 import { saveGameResult, saveMove, updateElo } from "./game.service"
 
-interface GameSessionInterface {
-    gameId: string;
-    players: string[];
-    chess: Chess;
-    status: GameStatus;
-    whiteTimeLeft: number;
-    blackTimeLeft: number;
-    timer?: NodeJS.Timeout
-}
+const gameSessions = new Map<string, InMemoryGameSession>();
 
-const gameSessions = new Map<string, GameSessionInterface>();
-
-const startTimer = (session: GameSessionInterface, io: SocketIOServer, fastify: FastifyInstance): void => {
+const startTimer = (session: InMemoryGameSession, io: SocketIOServer, fastify: FastifyInstance): void => {
     if (session.timer) clearInterval(session.timer);
     console.log("Starting timer for gameId:", session.gameId);
     console.log("Timer interval:", session.whiteTimeLeft);
@@ -43,7 +34,7 @@ const startTimer = (session: GameSessionInterface, io: SocketIOServer, fastify: 
     }, 1000)
 }
 
-const endGame = async (fastify: FastifyInstance, session: GameSessionInterface, io: SocketIOServer, result: string) => {
+const endGame = async (fastify: FastifyInstance, session: InMemoryGameSession, io: SocketIOServer, result: string) => {
     if (session.timer) clearInterval(session.timer);
 
     const winnerId = result.includes('White') ? session.players[0] : result.includes('Black') ? session.players[1] : null;
@@ -66,7 +57,7 @@ const endGame = async (fastify: FastifyInstance, session: GameSessionInterface, 
     gameSessions.delete(session.gameId)
 }
 
-const getGameState = (session: GameSessionInterface) => {
+const getGameState = (session: InMemoryGameSession) => {
     return {
         fen: session.chess.fen(),
         players: session.players,
@@ -128,8 +119,30 @@ export const handleMove = async (socket: Socket, io: SocketIOServer, fastify: Fa
             playerId: currentPlayerId
         });   
 
+      // If the game is already finished, send the final state
+      if (session && session.status === GameStatus.finished) {
+          const gameState = getGameState(session);
+          let result = '';
+          if (session.chess.isCheckmate()) {
+              result = `Checkmate! ${session.chess.turn() === 'w' ? 'Black' : 'White'} wins!`;
+          } else if (session.chess.isDraw()) {
+              result = 'Draw!';
+          } else if (session.chess.isStalemate()) {
+              result = 'Draw by stalemate!';
+          } else if (session.chess.isThreefoldRepetition()) {
+              result = 'Draw by threefold repetition!';
+          } else if (session.chess.isInsufficientMaterial()) {
+              result = 'Draw by insufficient material!';
+          }
+          io.to(gameId).emit('gameOver', { 
+              message: 'Game over', 
+              gameState,
+              result
+          });
+      }
+
       // Check if the game is over
-      if (session.chess.isGameOver()) {
+      if (session && session.chess.isGameOver()) {
           let result = '';
           
           if (session.chess.isCheckmate()) {
@@ -149,7 +162,7 @@ export const handleMove = async (socket: Socket, io: SocketIOServer, fastify: Fa
           await endGame(fastify, session, io, result);
       } else {
           // Game continues
-          startTimer(session, io, fastify);
+          if (session) startTimer(session, io, fastify);
       }
     }
     catch (error) {
@@ -165,7 +178,7 @@ export const handleSocketConnection = async (socket: Socket, io: SocketIOServer,
     // Handle join game with specific Game ID and User ID
     socket.on('joinGame', async ({ gameId, userId }) => {
         // Get in-memory sesion
-        let session: GameSessionInterface | null = gameSessions.get(gameId) as GameSessionInterface
+        let session: InMemoryGameSession | null = gameSessions.get(gameId) as InMemoryGameSession
         console.log("Joining game with ID:", gameId);
         console.log("Current game sessions before join:", Array.from(gameSessions.keys()));
         
@@ -185,17 +198,19 @@ export const handleSocketConnection = async (socket: Socket, io: SocketIOServer,
             session = {
                 gameId,
                 players: [userId],
+                playerSockets: [socket],
                 chess: new Chess(),
                 status: gameDoc.status === GameStatus.pending || gameDoc.status === GameStatus.waiting ? GameStatus.waiting : GameStatus.active,
                 whiteTimeLeft: gameDoc.whiteTimeLeft || gameDoc.timeLimit,
-                blackTimeLeft: gameDoc.blackTimeLeft || gameDoc.timeLimit
+                blackTimeLeft: gameDoc.blackTimeLeft || gameDoc.timeLimit,
+                gameState: ''
             };
             gameSessions.set(gameId, session);
             console.log("Game sessions after adding new session:", Array.from(gameSessions.keys()));
         }
     
         // If the join player not in the system current session 
-        if (session.players.length < 2 && !session.players.includes(userId)) {
+        if (session && session.players.length < 2 && !session.players.includes(userId)) {
             // Add joined player to the session
             session.players.push(userId)
 
@@ -232,7 +247,7 @@ export const handleSocketConnection = async (socket: Socket, io: SocketIOServer,
         socket.data = { gameId, userId }
         // Send the user to the room
         socket.join(gameId);
-        if (session.status === GameStatus.active) startTimer(session, io, fastify);
+        if (session && session.status === GameStatus.active) startTimer(session, io, fastify);
         // Send game state to the room => both players can receive
         io.to(gameId).emit('gameState', {
             ...getGameState(session),
@@ -253,17 +268,17 @@ export const handleSocketConnection = async (socket: Socket, io: SocketIOServer,
 
     // Handle rejoin game
     socket.on('rejoinGame', ({ gameId, userId }) => {
-        const session: GameSessionInterface = gameSessions.get(gameId) as GameSessionInterface;
+        const session = gameSessions.get(gameId);
         if (session && session.players.includes(userId)) {
             socket.data = { gameId, userId }
             socket.join(gameId)
 
-            if (session.status === "pause" && session.players.length === 2) {
-                session.status = GameStatus.active
-                startTimer(session, io, fastify)
-                io.to(gameId).emit('gameResumed', { message: 'Opponent reconnected' })
+            if (session && session.players.length === 2 && session.status === GameStatus.paused) {
+                session.status = GameStatus.active;
+                startTimer(session, io, fastify);
+                io.to(gameId).emit('gameResumed', { message: 'Opponent reconnected' });
             }
-            io.to(gameId).emit('gameState', getGameState(session));
+            if (session) io.to(gameId).emit('gameState', getGameState(session));
         }
     })
 
@@ -274,7 +289,7 @@ export const handleSocketConnection = async (socket: Socket, io: SocketIOServer,
 
         if (!gameId || !userId) return;
 
-        const session: GameSessionInterface = gameSessions.get(gameId) as GameSessionInterface
+        const session: InMemoryGameSession = gameSessions.get(gameId) as InMemoryGameSession
 
         if (session && session.players.includes(userId)) {
             if (session.timer) clearInterval(session.timer);
@@ -283,7 +298,7 @@ export const handleSocketConnection = async (socket: Socket, io: SocketIOServer,
             io.to(gameId).emit('opponentDisconnected', { message: 'Waiting for reconnect (30s)' })
 
             setTimeout(async () => {
-                if (session.status === GameStatus.paused) {
+                if (session && session.status === GameStatus.paused) {
                     await endGame(fastify, session, io, `${userId === session.players[0] ? 'Black' : 'White'} wins by disconnect`)
                 }
             }, 3000);

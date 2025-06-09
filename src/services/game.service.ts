@@ -4,17 +4,7 @@ import { PrismaClient } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import { GameSession, IGameSession } from '../models/GameSession';
 import { PlayMode, GameResult, GameStatus } from '../types/enum';
-interface GameSession {
-    gameId: string;
-    playerSockets: Socket[];
-    gameState: string;
-    chess: Chess;
-}
-
-interface WaitingPlayer {
-    socket: Socket;
-    elo: number;
-}
+import { InMemoryGameSession, WaitingPlayer } from '../types/game.types';
 
 export const createGame = async (
     prisma: PrismaClient,
@@ -363,24 +353,28 @@ export const updateElo = async (prisma: PrismaClient, gameId: string, winnerId: 
     }
 }
 
-const gameSessions: { [gameId: string]: GameSession } = {};
+const gameSessions: { [gameId: string]: InMemoryGameSession } = {};
 const waitingPlayers: WaitingPlayer[] = [];
 
 const generateGameId = (): string => {
     return Math.random().toString(36).substring(2, 15);
 }
 
-export const createNewGameSession = (socket1: Socket, socket2: Socket): GameSession => {
-    const gameId = generateGameId()
-    const chess = new Chess()
-    const newGame: GameSession = {
+export const createNewGameSession = (socket1: Socket, socket2: Socket): InMemoryGameSession => {
+    const gameId = generateGameId();
+    const chess = new Chess();
+    const newGame: InMemoryGameSession = {
         gameId: gameId,
+        players: [],
         playerSockets: [socket1, socket2],
-        gameState: chess.fen(),
-        chess: chess
-    }
-    gameSessions[gameId] = newGame
-    return newGame
+        chess: chess,
+        status: GameStatus.waiting,
+        whiteTimeLeft: 0,
+        blackTimeLeft: 0,
+        gameState: chess.fen()
+    };
+    gameSessions[gameId] = newGame;
+    return newGame;
 }
 
 export const handleMove = (socket: Socket, io: SocketIOServer, gameId: string, move: string) => {
@@ -499,7 +493,7 @@ export const handleMove = (socket: Socket, io: SocketIOServer, gameId: string, m
 //     }
 // }
 
-export const handleDisconnect = (socket: Socket, reason: string) => {
+export const handleDisconnect = (socket: Socket, reason: string): void => {
     const index = waitingPlayers.findIndex(player => player.socket.id === socket.id);
     if (index > -1) {
         waitingPlayers.splice(index, 1);
