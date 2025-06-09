@@ -1,155 +1,359 @@
-// This controller handles HTTP requests related to users
+import { FastifyInstance, FastifyRequest, FastifyReply, RouteGenericInterface } from "fastify";
+import { UserService, CreateUserInput, UpdateUserInput, UpdateProfileInput } from "../services/user.service";
+import { uploadController } from "../controllers/upload.controller";
 
-import { FastifyRequest, FastifyReply } from 'fastify';
-import {userService, CreateUserInput, UpdateUserInput, UpdateProfileInput} from '../services/user.service';
-
-interface IdParams { // (e.g., /users/:id)
-    id: string;
+interface IdParams {
+  id: string;
 }
 
-interface QueryParams { // (e.g., /users?limit=10&offset=0)
-    limit?: number;
-    offset?: number;
+interface QueryParams {
+  limit?: number;
+  offset?: number;
 }
 
-export const userController = {
-    // Create a new user
-    async createUser(
-        request: FastifyRequest<{ Body: CreateUserInput }>,
-        reply: FastifyReply
-    ) {
-        try {
-            const user = await userService.createUser(request.body);
-            return reply.code(201).send(user);
-        } catch (error) {
-            request.log.error(error);
-            if ((error as any).code === 'P2002') {
-                // Prisma unique constraint error
-                return reply.code(409).send({ 
-                    message: 'Username, email, or wallet address already exists' 
-                });
-            }
-            return reply.code(500).send({ message: 'Internal server error' });
-        }
-    },
-    
-    // Get a user by ID
-    async getUserById(
-        request: FastifyRequest<{ Params: IdParams }>,
-        reply: FastifyReply
-    ) {
-        const { id } = request.params;
-        const user = await userService.getUserById(id);
-        
-        if (!user) {
-            return reply.code(404).send({ message: 'User not found' });
-        }
-        
-        return reply.code(200).send(user);
-    },
-    
-    // Get all users
-    async getAllUsers(
-        request: FastifyRequest<{ Querystring: QueryParams }>,
-        reply: FastifyReply
-    ) {
-        const limit = request.query.limit || 10;
-        const offset = request.query.offset || 0;
-        
-        const result = await userService.getAllUsers(limit, offset);
-        return reply.code(200).send(result);
-    },
+interface RegisterRequest {
+  Body: CreateUserInput;
+}
 
-    async getProfile(
-        request: FastifyRequest,
-        reply: FastifyReply
-    ) {
-        try {
-            // Get the user ID from the JWT token
-            const userId = (request as any).user?.id;
+interface LoginRequest {
+  Body: { identifier: string; password: string };
+}
 
-            if (!userId) {
-                return reply.code(401).send({ message: 'Authentication required' });
-            }
+interface RequestPasswordReset {
+  Body: { email: string };
+}
 
-            const user = await userService.getUserById(userId);
+interface ResetPasswordRequest {
+  Body: { email: string; resetCode: string; newPassword: string };
+}
 
-            if (!user) {
-                return reply.code(404).send({ message: 'User not found' });
-            }
+interface UpdatePasswordRequest {
+  Body: { oldPassword: string; newPassword: string };
+}
 
-            return reply.code(200).send({ user });
-        } catch (error) {
-            request.log.error(error);
-            return reply.code(500).send({ message: 'Internal server error' });
-        }
-    },
-    
-    // Update a user
-    async updateUser(
-        request: FastifyRequest<{ Params: IdParams; Body: UpdateUserInput }>,
-        reply: FastifyReply
-    ) {
-        const { id } = request.params;
-        
-        try {
-            const updatedUser = await userService.updateUser(id, request.body);
-            
-            if (!updatedUser) {
-                return reply.code(404).send({ message: 'User not found' });
-            }
-            
-            return reply.code(200).send(updatedUser);
-        } catch (error) {
-            request.log.error(error);
-            if ((error as any).code === 'P2002') {
-                // Prisma unique constraint error
-                return reply.code(409).send({ 
-                    message: 'Username, email, or wallet address already exists' 
-                });
-            }
-            return reply.code(500).send({ message: 'Internal server error' });
-        }
-    },
+interface GoogleCallbackRequest {
+  Querystring: { code: string; state: string };
+}
 
-    async updateProfile(
-        request: FastifyRequest<{ Params: IdParams; Body: UpdateProfileInput }>,
-        reply: FastifyReply
-    ) {
-        const { id } = request.params;
+interface CompleteGoogleLoginRequest {
+  Body: { tempToken: string; username: string };
+}
 
-        try {
-            const updatedUser = await userService.updateProfile(id, request.body);
+interface CheckAuthTypeRequest {
+  Body: { email: string };
+}
 
-            if (!updatedUser) {
-                return reply.code(404).send({ message: 'User not found' });
-            }
+interface VerifyResetCodeRequest {
+  Body: { email: string; resetCode: string };
+}
 
-            return reply.code(200).send(updatedUser);
-        } catch (error) {
-            request.log.error(error);
-            if ((error as any).code === 'P2002') {
-                // Prisma unique constraint error
-                return reply.code(409).send({
-                    message: 'Username, email, or wallet address already exists'
-                });
-            }
-            return reply.code(500).send({ message: 'Internal server error' });
-        }
-    },
-    
-    // Delete a user
-    async deleteUser(
-        request: FastifyRequest<{ Params: IdParams }>,
-        reply: FastifyReply
-    ) {
-        const { id } = request.params;
-        const deleted = await userService.deleteUser(id);
-        
-        if (!deleted) {
-            return reply.code(404).send({ message: 'User not found' });
-        }
-        
-        return reply.code(200).send({ message: 'User deleted successfully' });
-    },
-};
+interface ProfileRequest extends RouteGenericInterface {
+  Headers: { authorization?: string };
+  user?: { id: string; username: string; googleAuth: boolean };
+}
+
+interface UpdateProfileRequest {
+  Params: IdParams;
+  Body: UpdateProfileInput;
+}
+
+export default class UserController {
+  private userService: UserService;
+
+  constructor(fastify: FastifyInstance) {
+    this.userService = new UserService(fastify);
+  }
+
+  async createUser(
+    request: FastifyRequest<RegisterRequest>,
+    reply: FastifyReply
+  ): Promise<void> {
+    try {
+      const user = await this.userService.createUser(request.body);
+      reply.status(201).send(user);
+    } catch (error: any) {
+      request.log.error(error);
+      if (error.message.includes('username')) {
+        reply.status(409).send({ message: 'This username is already taken (case-insensitive). Please choose a different username.' });
+      } else if (error.message.includes('email')) {
+        reply.status(409).send({ message: 'This email is already registered. Please use a different email.' });
+      } else {
+        reply.status(500).send({ message: 'Internal server error' });
+      }
+    }
+  }
+
+  async getUserById(
+    request: FastifyRequest<{ Params: IdParams }>,
+    reply: FastifyReply
+  ): Promise<void> {
+    const { id } = request.params;
+    const user = await this.userService.getUserById(id);
+
+    if (!user) {
+      reply.status(404).send({ message: 'User not found' });
+    } else {
+      reply.status(200).send(user);
+    }
+  }
+
+  async getAllUsers(
+    request: FastifyRequest<{ Querystring: QueryParams }>,
+    reply: FastifyReply
+  ): Promise<void> {
+    const limit = request.query.limit || 10;
+    const offset = request.query.offset || 0;
+
+    const result = await this.userService.getAllUsers(limit, offset);
+    reply.status(200).send(result);
+  }
+
+  async getProfile(
+    request: FastifyRequest<ProfileRequest>,
+    reply: FastifyReply
+  ): Promise<void> {
+    try {
+      const userId = (request as any).user?.id;
+
+      if (!userId) {
+        reply.status(401).send({ message: 'Authentication required' });
+        return;
+      }
+
+      const user = await this.userService.getUserById(userId);
+
+      if (!user) {
+        reply.status(404).send({ message: 'User not found' });
+        return;
+      }
+
+      reply.status(200).send({ user });
+    } catch (error) {
+      request.log.error(error);
+      reply.status(500).send({ message: 'Internal server error' });
+    }
+  }
+
+  async updateUser(
+    request: FastifyRequest<{ Params: IdParams; Body: UpdateUserInput }>,
+    reply: FastifyReply
+  ): Promise<void> {
+    const { id } = request.params;
+
+    try {
+      const updatedUser = await this.userService.updateUser(id, request.body);
+
+      if (!updatedUser) {
+        reply.status(404).send({ message: 'User not found' });
+        return;
+      }
+
+      reply.status(200).send(updatedUser);
+    } catch (error: any) {
+      request.log.error(error);
+      if (error.message.includes('username')) {
+        reply.status(409).send({ message: 'This username is already taken (case-insensitive). Please choose a different username.' });
+      } else if (error.message.includes('email')) {
+        reply.status(409).send({ message: 'This email is already registered. Please use a different email.' });
+      } else {
+        reply.status(500).send({ message: 'Internal server error' });
+      }
+    }
+  }
+
+  async updateProfile(
+    request: FastifyRequest<UpdateProfileRequest>,
+    reply: FastifyReply
+  ): Promise<void> {
+    const { id } = request.params;
+    const { username, avatarUrl } = request.body;
+
+    try {
+      const updatedUser = await this.userService.updateProfile(id, { username, avatarUrl });
+
+      if (!updatedUser) {
+        reply.status(404).send({ message: 'User not found' });
+        return;
+      }
+
+      reply.status(200).send(updatedUser);
+    } catch (error: any) {
+      request.log.error(error);
+      if (error.message.includes('Username already taken')) {
+        reply.status(409).send({ message: 'This username already exists, please choose another username.' });
+      } else {
+        reply.status(500).send({ message: 'Internal server error' });
+      }
+    }
+  }
+
+  async deleteUser(
+    request: FastifyRequest<{ Params: IdParams }>,
+    reply: FastifyReply
+  ): Promise<void> {
+    const { id } = request.params;
+    const deleted = await this.userService.deleteUser(id);
+
+    if (!deleted) {
+      reply.status(404).send({ message: 'User not found' });
+    } else {
+      reply.status(200).send({ message: 'User deleted successfully' });
+    }
+  }
+
+  async login(
+    request: FastifyRequest<LoginRequest>,
+    reply: FastifyReply
+  ): Promise<void> {
+    try {
+      const { identifier, password } = request.body;
+      const { token, data } = await this.userService.login(identifier, password);
+      reply.status(200).send({ token, user: data });
+    } catch (error: any) {
+      reply.status(401).send({ message: error.message });
+    }
+  }
+
+  async requestPasswordReset(
+    request: FastifyRequest<RequestPasswordReset>,
+    reply: FastifyReply
+  ): Promise<void> {
+    try {
+      const { email } = request.body;
+      await this.userService.requestPasswordReset(email);
+      reply.status(200).send({ message: "Verification code sent successfully" });
+    } catch (error: any) {
+      reply.status(400).send({ message: error.message });
+    }
+  }
+
+  async resetPassword(
+    request: FastifyRequest<ResetPasswordRequest>,
+    reply: FastifyReply
+  ): Promise<void> {
+    try {
+      const { email, resetCode, newPassword } = request.body;
+      const { token } = await this.userService.resetPassword(email, resetCode, newPassword);
+      const user = await this.userService.getUserByEmail(email);
+      if (!user) {
+        reply.status(404).send({ message: 'User not found' });
+        return;
+      }
+      reply.status(200).send({ token, user });
+    } catch (error: any) {
+      reply.status(400).send({ message: error.message });
+    }
+  }
+
+  async updatePassword(
+    request: FastifyRequest<UpdatePasswordRequest>,
+    reply: FastifyReply
+  ): Promise<void> {
+    try {
+      const { oldPassword, newPassword } = request.body;
+      const { id } = (request as any).user!;
+      await this.userService.updatePassword(id, oldPassword, newPassword);
+      reply.status(200).send({ message: "Password updated successfully" });
+    } catch (error: any) {
+      reply.status(400).send({ message: error.message });
+    }
+  }
+
+  async googleCallback(
+    request: FastifyRequest<GoogleCallbackRequest>,
+    reply: FastifyReply
+  ): Promise<void> {
+    try {
+      const { code, state } = request.query;
+      const result = await this.userService.googleCallback(code, state);
+      if ('email' in result) {
+        reply.type('text/html').send(`
+          <script>
+            window.opener.postMessage({
+              type: 'google-auth-prompt-username',
+              email: '${result.email}',
+              tempToken: '${result.tempToken}'
+            }, 'http://localhost:3000');
+            window.close();
+          </script>
+        `);
+      } else {
+        reply.type('text/html').send(`
+          <script>
+            window.opener.postMessage({
+              type: 'google-auth',
+              token: '${result.token}',
+              userId: '${result.data.id}',
+              username: '${result.data.username}',
+              email: '${result.data.email}',
+              avatarUrl: '${result.data.avatarUrl || ''}'
+            }, 'http://localhost:3000');
+            window.close();
+          </script>
+        `);
+      }
+    } catch (error: any) {
+      reply.type('text/html').send(`
+        <script>
+          window.opener.postMessage({
+            type: 'google-auth-error',
+            error: '${error.message}'
+          }, 'http://localhost:3000');
+          window.close();
+        </script>
+      `);
+    }
+  }
+
+  async completeGoogleLogin(
+    request: FastifyRequest<CompleteGoogleLoginRequest>,
+    reply: FastifyReply
+  ): Promise<void> {
+    try {
+      const { tempToken, username } = request.body;
+      const { token, data } = await this.userService.completeGoogleLogin(tempToken, username);
+      reply.status(200).send({ token, user: data });
+    } catch (error: any) {
+      reply.status(400).send({ message: error.message });
+    }
+  }
+
+  async checkAuthType(
+    request: FastifyRequest<CheckAuthTypeRequest>,
+    reply: FastifyReply
+  ): Promise<void> {
+    try {
+      const { email } = request.body;
+      const result = await this.userService.checkAuthType(email);
+      reply.status(200).send(result);
+    } catch (error: any) {
+      reply.status(400).send({ message: error.message });
+    }
+  }
+
+  async verifyResetCode(
+    request: FastifyRequest<VerifyResetCodeRequest>,
+    reply: FastifyReply
+  ): Promise<void> {
+    try {
+      const { email, resetCode } = request.body;
+      await this.userService.verifyResetCode(email, resetCode);
+      reply.status(200).send({ message: "Verification code is valid" });
+    } catch (error: any) {
+      reply.status(400).send({ message: error.message });
+    }
+  }
+
+  async googleAuth(
+    request: FastifyRequest<{ Querystring: { state: string } }>,
+    reply: FastifyReply
+  ): Promise<void> {
+    try {
+      const { state } = request.query;
+      const authUrl = await this.userService.googleAuth(state);
+      reply.redirect(authUrl);
+    } catch (error: any) {
+      reply.status(500).send({ message: error.message });
+    }
+  }
+}
