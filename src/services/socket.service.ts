@@ -7,6 +7,7 @@ import { InMemoryGameSession } from '../types/game.types';
 import { saveGameResult, saveMove, updateElo } from "./game.service"
 
 const gameSessions = new Map<string, InMemoryGameSession>();
+const onlineUsers = new Map<string, { userId: string; socketId: string; lastSeen: Date }>();
 
 const startTimer = (session: InMemoryGameSession, io: SocketIOServer, fastify: FastifyInstance): void => {
     if (session.timer) clearInterval(session.timer);
@@ -175,9 +176,36 @@ export const handleMove = async (socket: Socket, io: SocketIOServer, fastify: Fa
 export const handleSocketConnection = async (socket: Socket, io: SocketIOServer, fastify: FastifyInstance) => {
     console.log('New client connected:', socket.id);
 
+    // Track user connection
+    socket.on('identify', (userId: string) => {
+        if (!userId) return;
+        
+        // Remove user from any previous connections
+        for (const [id, user] of onlineUsers.entries()) {
+            if (user.userId === userId) {
+                onlineUsers.delete(id);
+            }
+        }
+        
+        // Add new connection
+        onlineUsers.set(socket.id, {
+            userId,
+            socketId: socket.id,
+            lastSeen: new Date()
+        });
+        
+        // Notify all clients about the updated online users
+        io.emit('onlineUsers', Array.from(onlineUsers.values()).map(u => u.userId));
+    });
+
+    // Handle get online users
+    socket.on('getOnlineUsers', () => {
+        const users = Array.from(onlineUsers.values()).map(u => u.userId);
+        socket.emit('onlineUsers', users);
+    });
+
     // Handle join game with specific Game ID and User ID
     socket.on('joinGame', async ({ gameId, userId }) => {
-        // Get in-memory sesion
         let session: InMemoryGameSession | null = gameSessions.get(gameId) as InMemoryGameSession
         console.log("Joining game with ID:", gameId);
         console.log("Current game sessions before join:", Array.from(gameSessions.keys()));
@@ -284,6 +312,15 @@ export const handleSocketConnection = async (socket: Socket, io: SocketIOServer,
 
     socket.on('disconnect', () => {
         fastify.log.info(`Client disconnected: ${socket.id}`);
+        
+        // Remove user from online users
+        if (onlineUsers.has(socket.id)) {
+            const { userId } = onlineUsers.get(socket.id)!;
+            onlineUsers.delete(socket.id);
+            // Notify all clients about the updated online users
+            io.emit('onlineUsers', Array.from(onlineUsers.values()).map(u => u.userId));
+        }
+        
         const gameId = socket.data?.gameId;
         const userId = socket.data?.userId;
 
