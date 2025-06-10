@@ -2,9 +2,9 @@ import { Server as SocketIOServer, Socket } from "socket.io"
 import { Chess } from "chess.js"
 import fastify, { FastifyInstance } from "fastify"
 import { GameSession, IGameSession } from "../models/GameSession"
-import { GameStatus } from '../types/enum'
+import { GameStatus, PlayMode } from '../types/enum'
 import { InMemoryGameSession } from '../types/game.types';
-import { saveGameResult, saveMove, updateElo } from "./game.service"
+import * as GameService from "./game.service"
 
 const gameSessions = new Map<string, InMemoryGameSession>();
 const onlineUsers = new Map<string, { userId: string; socketId: string; lastSeen: Date }>();
@@ -39,10 +39,10 @@ const endGame = async (fastify: FastifyInstance, session: InMemoryGameSession, i
     if (session.timer) clearInterval(session.timer);
 
     const winnerId = result.includes('White') ? session.players[0] : result.includes('Black') ? session.players[1] : null;
-    const eloUpdate = await updateElo(fastify.prisma, session.gameId, winnerId);
+    const eloUpdate = await GameService.updateElo(fastify.prisma, session.gameId, winnerId);
     
     // Save the game result to the database
-    await saveGameResult(session.gameId, result);
+    await GameService.saveGameResult(session.gameId, result);
     
     // Log the winner for debugging
     console.log(`Game ${session.gameId} ended. Result: ${result}. Winner: ${winnerId || 'Draw'}`);
@@ -109,7 +109,7 @@ export const handleMove = async (socket: Socket, io: SocketIOServer, fastify: Fa
         // Save the move to the database with player color and ID
         const moveNumber = session.chess.history().length;
         const color = isWhiteTurn ? 'white' : 'black';
-        await saveMove(gameId, move, moveNumber, color, currentPlayerId);
+        await GameService.saveMove(gameId, move, moveNumber, color, currentPlayerId);
     
         // Broadcast the move to all players
         io.to(gameId).emit('gameState', {
@@ -196,6 +196,40 @@ export const handleSocketConnection = async (socket: Socket, io: SocketIOServer,
         
         // Notify all clients about the updated online users
         io.emit('onlineUsers', Array.from(onlineUsers.values()).map(u => u.userId));
+    });
+
+    // Handle game challenge
+    socket.on('challengeUser', async (data: {
+        opponentId: string,
+        playMode: PlayMode,
+        colorPreference: 'white' | 'black' | 'random'
+    }) => {
+        const result = await GameService.challengeUser(
+            fastify.prisma,
+            io,
+            socket,
+            data.opponentId,
+            data.playMode,
+            data.colorPreference
+        );
+
+        if (!result.success) {
+            socket.emit('challengeError', result);
+        }
+    });
+
+    // Handle challenge response
+    socket.on('respondToChallenge', async (data: { accept: boolean }) => {
+        const result = await GameService.respondToChallenge(
+            fastify.prisma,
+            io,
+            socket,
+            data.accept
+        );
+
+        if (!result.success) {
+            socket.emit('challengeError', result);
+        }
     });
 
     // Handle get online users

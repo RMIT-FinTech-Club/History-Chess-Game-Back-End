@@ -2,6 +2,8 @@ import { Socket, Server as SocketIOServer } from 'socket.io'
 import * as GameServices from '../services/game.service';
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { createGame, findMatch } from '../services/game.service';
+import { PrismaClient } from '@prisma/client';
+import { PlayMode } from '../types/enum';
 
 // export const handleJoinGame = (socket: Socket, io: SocketIOServer, playerElo: number): void => {
 //     GameServices.joinGame(socket, io, playerElo);
@@ -26,17 +28,51 @@ export const createNewGame = async (req: FastifyRequest, res: FastifyReply) => {
 // Handle Find Match Request
 export const findNewMatch = async (req: FastifyRequest, res: FastifyReply) => {
     const { userId, playMode, colorPreference } = req.body as any;
-
-
     const gameId = await findMatch(req.server.prisma, userId, playMode, colorPreference);
-
-
     console.log("\n GAME STARTED\n")
     return res.code(200).send({gameId})
 }
 
-// Handle Challenge Other User Request
-export const challengeUser = async (req: FastifyRequest, res: FastifyReply) => {
-    const { userId, opponentId, playMode, colorPreference } = req.body as any;
+export const handleGameChallenge = async (
+    socket: Socket,
+    io: SocketIOServer,
+    prisma: PrismaClient,
+    data: {
+        opponentId: string,
+        playMode: PlayMode,
+        colorPreference: 'white' | 'black' | 'random'
+    }
+) => {
+    const result = await GameServices.challengeUser(
+        prisma,
+        io,
+        socket,
+        data.opponentId,
+        data.playMode,
+        data.colorPreference
+    );
 
-}
+    if (!result.success) {
+        socket.emit('challengeError', result);
+    }
+};
+
+export const handleChallengeResponse = async (
+    socket: Socket,
+    io: SocketIOServer,
+    prisma: PrismaClient,
+    data: {
+        accept: boolean
+    }
+) => {
+    const result = await GameServices.respondToChallenge(
+        prisma,
+        io,
+        socket,
+        data.accept
+    );
+
+    if (!result.success) {
+        socket.emit('challengeError', result);
+    }
+};

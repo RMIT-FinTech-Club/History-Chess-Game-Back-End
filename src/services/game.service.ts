@@ -427,18 +427,11 @@ export const handleMove = (socket: Socket, io: SocketIOServer, gameId: string, m
             io.to(gameId).emit('gameOver', result);
             delete gameSessions[gameId];
         }
-
-
-
-
-
     }
     catch (error) {
         socket.emit('error', { message: 'Invalid move' });
     }
 }
-
-
 
 
 
@@ -517,3 +510,132 @@ export const handleDisconnect = (socket: Socket, reason: string): void => {
         }
     }
 }
+
+const pendingChallenges: Map<string, { 
+    challengerId: string, 
+    opponentId: string, 
+    playMode: PlayMode, 
+    colorPreference: 'white' | 'black' | 'random',
+    timer: NodeJS.Timeout,
+    challengerSocket: Socket,
+    opponentSocket: Socket
+}> = new Map();
+
+export const challengeUser = async (
+    prisma: PrismaClient,
+    io: SocketIOServer,
+    challengerSocket: Socket,
+    opponentId: string,
+    playMode: PlayMode,
+    colorPreference: 'white' | 'black' | 'random'
+): Promise<{ success: boolean; message: string }> => {
+    // Check if both users exist
+    const [challenger, opponent] = await Promise.all([
+        prisma.users.findUnique({ where: { id: challengerSocket.data.userId } }),
+        prisma.users.findUnique({ where: { id: opponentId } })
+    ]);
+
+    if (!challenger || !opponent) {
+        return { success: false, message: 'One or both users not found' };
+    }
+
+    // Check if there's already a pending challenge
+    if (pendingChallenges.has(opponentId)) {
+        return { success: false, message: 'User already has a pending challenge' };
+    }
+
+    // Find opponent's socket
+    const opponentSocket = Array.from(io.sockets.sockets.values())
+        .find(socket => socket.data.userId === opponentId);
+
+    if (!opponentSocket) {
+        return { success: false, message: 'Opponent is not online' };
+    }
+
+    // Create a new challenge
+    const timer = setTimeout(() => {
+        const challenge = pendingChallenges.get(opponentId);
+        if (challenge) {
+            challenge.challengerSocket.emit('challengeExpired', {
+                opponentId,
+                message: 'Challenge expired'
+            });
+            pendingChallenges.delete(opponentId);
+        }
+    }, 30000); // 30 seconds timeout
+
+    pendingChallenges.set(opponentId, {
+        challengerId: challengerSocket.data.userId,
+        opponentId,
+        playMode,
+        colorPreference,
+        timer,
+        challengerSocket,
+        opponentSocket
+    });
+
+    opponentSocket.emit('gameChallenge', {
+        challengerId: challengerSocket.data.userId,
+        challengerName: challenger.username,
+        playMode,
+        colorPreference
+    });
+
+    return { success: true, message: 'Challenge sent successfully' };
+};
+
+export const respondToChallenge = async (
+    prisma: PrismaClient,
+    io: SocketIOServer,
+    opponentSocket: Socket,
+    accept: boolean
+): Promise<{ success: boolean; message: string; gameId?: string }> => {
+    const challenge = Array.from(pendingChallenges.values())
+        .find(c => c.opponentSocket.id === opponentSocket.id);
+    
+    if (!challenge) {
+        return { success: false, message: 'No pending challenge found' };
+    }
+
+    clearTimeout(challenge.timer);
+    pendingChallenges.delete(challenge.opponentId);
+
+    // Notify challenger of the response
+    challenge.challengerSocket.emit('challengeResponse', {
+        opponentId: challenge.opponentId,
+        accepted: accept
+    });
+
+    if (!accept) {
+        return { success: false, message: 'Challenge declined' };
+    }
+
+    // Create a new game session
+    try {
+        const gameId = await createGame(
+            prisma,
+            challenge.challengerId,
+            challenge.playMode,
+            challenge.colorPreference,
+            challenge.opponentId
+        );
+
+        // Notify both players that the game is starting
+        io.to([challenge.challengerSocket.id, challenge.opponentSocket.id]).emit('gameStarting', {
+            gameId,
+            playMode: challenge.playMode,
+            colorPreference: challenge.colorPreference
+        });
+
+        return { 
+            success: true, 
+            message: 'Challenge accepted', 
+            gameId 
+        };
+    } catch (error) {
+        return { 
+            success: false, 
+            message: 'Failed to create game session' 
+        };
+    }
+};
