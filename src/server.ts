@@ -32,6 +32,12 @@ server.register(fastifyCors, {
 server.register(fastifyJwt, {
   secret: process.env.JWT_SECRET || 'your-secret-key',
 });
+server.register(mongodbPlugin)
+server.register(neonPlugin)
+server.register(websocketPlugin)
+server.register(prismaPlugin)
+// server.register(gameRoutes)
+server.register(gameRoutes, { prefix: '/game' })
 
 // Register OAuth2 for Google
 server.register(fastifyOAuth2, {
@@ -125,41 +131,41 @@ server.ready(() => {
   server.log.info('All registered routes:');
   server.log.info(server.printRoutes());
 
-  const matchmakingInterval = setInterval(() => {
-    if (io) {
-      GameService.checkWaitingPlayersForMatches(io);
-    }
-  }, 1000);
+  
 
-  io.on('connection', (socket: Socket) => {
-    server.log.info(`Socket connected: ${socket.id}`);
+  // io.on('connection', (socket: Socket) => {
+  //   server.log.info(`Socket connected: ${socket.id}`);
     
-    // Keep messageFromClient handler commented out but intact
-    // socket.on('messageFromClient', (data: string) => {
-    //   server.log.info(`Received message from client ${socket.id}: ${data}`);
-    //   io.emit('messageFromServer', {
-    //     senderId: socket.id,
-    //     message: `Server received (manual - TypeScript ESM): ${data}`,
-    //   });
-    // });
+  //   // Keep messageFromClient handler commented out but intact
+  //   // socket.on('messageFromClient', (data: string) => {
+  //   //   server.log.info(`Received message from client ${socket.id}: ${data}`);
+  //   //   io.emit('messageFromServer', {
+  //   //     senderId: socket.id,
+  //   //     message: `Server received (manual - TypeScript ESM): ${data}`,
+  //   //   });
+  //   // });
 
-    socket.on('joinGame', (data: { elo: number }) => {
-      server.log.info(`\nPlayer ${socket.id} requesting to join game with data: ${JSON.stringify(data)}`);
-      GameController.handleJoinGame(socket, io, data.elo || 1200);
-    });
+  //   socket.on('joinGame', (data: { elo: number }) => {
+  //     server.log.info(`\nPlayer ${socket.id} requesting to join game with data: ${JSON.stringify(data)}`);
+  //     GameController.handleJoinGame(socket, io, data.elo || 1200);
+  //   });
 
-    socket.on('makeMove', (data: { gameId: string, move: string }) => {
-      GameService.handleMove(socket, io, data.gameId, data.move);
-    });
+  //   socket.on('makeMove', (data: { gameId: string, move: string }) => {
+  //     GameService.handleMove(socket, io, data.gameId, data.move);
+  //   });
 
-    socket.on('disconnect', (reason: string) => {
-      server.log.info(`Socket disconnected: ${socket.id} due to ${reason}`);
-      GameController.handleDisconnect(socket, reason);
-    });
+  //   socket.on('disconnect', (reason: string) => {
+  //     server.log.info(`Socket disconnected: ${socket.id} due to ${reason}`);
+  //     GameController.handleDisconnect(socket, reason);
+  //   });
 
-    socket.emit('welcomeMessage', 'Welcome to the Chess Game Realtime Server!');
-  });
+  //   socket.emit('welcomeMessage', 'Welcome to the Chess Game Realtime Server!');
+  // });
+
+
+  
 });
+
 
 server.get('/', async (request, reply) => {
   return { hello: 'world from Fastify + Manual Socket.IO (TypeScript ESM)!' };
