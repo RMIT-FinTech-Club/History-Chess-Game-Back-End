@@ -32,12 +32,7 @@ server.register(fastifyCors, {
 server.register(fastifyJwt, {
   secret: process.env.JWT_SECRET || 'your-secret-key',
 });
-server.register(mongodbPlugin)
-server.register(neonPlugin)
-server.register(websocketPlugin)
-server.register(prismaPlugin)
-// server.register(gameRoutes)
-server.register(gameRoutes, { prefix: '/game' })
+
 
 // Register OAuth2 for Google
 server.register(fastifyOAuth2, {
