@@ -27,10 +27,20 @@ export const createNewGame = async (req: FastifyRequest, res: FastifyReply) => {
 
 // Handle Find Match Request
 export const findNewMatch = async (req: FastifyRequest, res: FastifyReply) => {
-    const { userId, playMode, colorPreference } = req.body as any;
-    const gameId = await findMatch(req.server.prisma, userId, playMode, colorPreference);
-    console.log("\n GAME STARTED\n")
-    return res.code(200).send({gameId})
+    const { userId, playMode, colorPreference, socketId } = req.body as any;
+    
+    if (!socketId) {
+        return res.code(400).send({ error: 'Socket ID is required' });
+    }
+
+    const result = await findMatch(req.server.prisma, userId, playMode, colorPreference, socketId);
+    console.log("\n MATCHMAKING RESULT\n", result);
+    
+    if (result) {
+        return res.code(200).send(result);
+    } else {
+        return res.code(200).send({ message: 'Added to matchmaking queue' });
+    }
 }
 
 export const handleGameChallenge = async (

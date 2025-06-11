@@ -101,12 +101,25 @@ export const saveGameResult = async (gameId: string, resultString: string) => {
     );
 }
 
+interface QueuedPlayer {
+    userId: string;
+    socketId: string;
+    playMode: PlayMode;
+    colorChoice: 'white' | 'black' | 'random';
+    elo: number;
+    timestamp: number;
+}
+
+// In-memory matchmaking queue
+const matchmakingQueue: QueuedPlayer[] = [];
+
 // Find Match function
 export const findMatch = async (
     prisma: PrismaClient,
     userId: string,
     playMode: PlayMode,
-    colorChoice: 'white' | 'black' | 'random'
+    colorChoice: 'white' | 'black' | 'random',
+    socketId: string
 ) => {
     // First verify that the user exists
     const user = await prisma.users.findUnique({
@@ -117,198 +130,115 @@ export const findMatch = async (
         throw new Error(`User with ID ${userId} not found`);
     }
 
-    // Define user's chosen mode
-    const timeLimit = playMode === PlayMode.bullet ? 1 : playMode === PlayMode.blitz ? 3 : 10;
-
     const eloRange = 1000;
     const minElo = user.elo - eloRange;
     const maxElo = user.elo + eloRange;
 
-    // Try to find a match where the user's color preference can be satisfied
-    let match;
-    
-    // First, look for ANY waiting game that matches the criteria regardless of color preference
-    // This ensures players get matched faster
-    match = await GameSession.findOne({
-        status: 'waiting',
+    const queuedPlayer: QueuedPlayer = {
+        userId,
+        socketId,
         playMode,
-        timeLimit: timeLimit * 60 * 1000,
-        $or: [
-            { whitePlayerId: null, blackPlayerId: { $ne: userId } },
-            { whitePlayerId: { $ne: userId }, blackPlayerId: null }
-        ]
-    });
-    
-    // If a match is found, assign the player to the appropriate position
-    if (match) {
-        // If white position is open and either player wants random or white
-        if (!match.whitePlayerId && (colorChoice === 'random' || colorChoice === 'white')) {
-            await GameSession.updateOne(
-                { gameId: match.gameId },
-                { 
-                    $set: { 
-                        whitePlayerId: userId, 
-                        whitePlayerElo: user.elo,
-                        status: 'active' 
-                    } 
-                }
-            );
-            return match.gameId;
-        } 
-        // If black position is open and either player wants random or black
-        else if (!match.blackPlayerId && (colorChoice === 'random' || colorChoice === 'black')) {
-            await GameSession.updateOne(
-                { gameId: match.gameId },
-                { 
-                    $set: { 
-                        blackPlayerId: userId, 
-                        blackPlayerElo: user.elo,
-                        status: 'active' 
-                    } 
-                }
-            );
-            return match.gameId;
-        }
-    }
-    
-    // If no match found or color preference couldn't be satisfied, try to find a match
-    // that specifically matches the player's color preference
-    if (colorChoice === 'white') {
-        match = await GameSession.findOne({
-            status: 'waiting',
-            playMode,
-            timeLimit: timeLimit * 60 * 1000,
-            whitePlayerId: null,
-            blackPlayerId: { $ne: userId },
-            'blackPlayerElo': { $gte: minElo, $lte: maxElo }
-        });
-        if (match) {
-            await GameSession.updateOne(
-                { gameId: match.gameId },
-                { 
-                    $set: { 
-                        whitePlayerId: userId, 
-                        whitePlayerElo: user.elo,
-                        status: 'active' 
-                    } 
-                }
-            );
-            return match.gameId;
-        }
-    } else if (colorChoice === 'black') {
-        match = await GameSession.findOne({
-            status: 'waiting',
-            playMode,
-            timeLimit: timeLimit * 60 * 1000,
-            whitePlayerId: { $ne: userId },
-            blackPlayerId: null,
-            'whitePlayerElo': { $gte: minElo, $lte: maxElo }
-        });
-        if (match) {
-            await GameSession.updateOne(
-                { gameId: match.gameId },
-                { 
-                    $set: { 
-                        blackPlayerId: userId, 
-                        blackPlayerElo: user.elo,
-                        status: 'active' 
-                    } 
-                }
-            );
-            return match.gameId;
-        }
+        colorChoice,
+        elo: user.elo,
+        timestamp: Date.now()
+    };
+
+    // Check if player is already in queue
+    const existingIndex = matchmakingQueue.findIndex(p => p.userId === userId);
+    if (existingIndex !== -1) {
+        matchmakingQueue[existingIndex] = queuedPlayer;
     } else {
-        match = await GameSession.findOne({
-            status: 'waiting',
-            playMode,
-            timeLimit: timeLimit * 60 * 1000,
-            $or: [
-                { 
-                    whitePlayerId: null, 
-                    blackPlayerId: { $ne: userId },
-                    'blackPlayerElo': { $gte: minElo, $lte: maxElo }
-                },
-                { 
-                    whitePlayerId: { $ne: userId }, 
-                    blackPlayerId: null,
-                    'whitePlayerElo': { $gte: minElo, $lte: maxElo }
-                }
-            ]
-        });
-        if (match) {
-            if (!match.whitePlayerId) {
-                await GameSession.updateOne(
-                    { gameId: match.gameId },
-                    { 
-                        $set: { 
-                            whitePlayerId: userId,
-                            whitePlayerElo: user.elo,
-                            status: 'active' 
-                        } 
-                    }
-                );
-            } else {
-                await GameSession.updateOne(
-                    { gameId: match.gameId },
-                    { 
-                        $set: { 
-                            blackPlayerId: userId,
-                            blackPlayerElo: user.elo,
-                            status: 'active' 
-                        } 
-                    }
-                );
+        matchmakingQueue.push(queuedPlayer);
+    }
+
+    // Try to find a match
+    const matchIndex = matchmakingQueue.findIndex((player, index) => {
+        if (player.userId === userId) return false; // Don't match with self
+        
+        // Check play mode
+        if (player.playMode !== playMode) return false;
+        
+        // Check ELO range
+        if (player.elo < minElo || player.elo > maxElo) return false;
+        
+        // Check color compatibility
+        if (colorChoice === 'white' && player.colorChoice === 'white') return false;
+        if (colorChoice === 'black' && player.colorChoice === 'black') return false;
+        
+        return true;
+    });
+
+    if (matchIndex !== -1) {
+        const matchedPlayer = matchmakingQueue[matchIndex];
+        // Remove both players from queue
+        matchmakingQueue.splice(matchIndex, 1);
+        const currentPlayerIndex = matchmakingQueue.findIndex(p => p.userId === userId);
+        if (currentPlayerIndex !== -1) {
+            matchmakingQueue.splice(currentPlayerIndex, 1);
+        }
+
+        // Create game session for matched players
+        const game = await prisma.games.create({
+            data: {
+                id: uuidv4(),
+                userId: userId,
+                status: 'active'
             }
-            return match.gameId;
-        }
-    }
+        });
 
-    // No match found, create a new game with the user's color preference
-    const game = await prisma.games.create({
-        data: {
-            id: uuidv4(), // Add unique ID
-            userId: userId,
-            status: 'active' // Add default status
-        }
-    });
+        // Determine player colors
+        let whitePlayerId: string;
+        let blackPlayerId: string;
+        let whitePlayerElo: number;
+        let blackPlayerElo: number;
 
-    let whitePlayerId: string | null = null;
-    let blackPlayerId: string | null = null;
-    let whitePlayerElo: number | null = null;
-    let blackPlayerElo: number | null = null;
-
-    if (colorChoice === 'white') {
-        whitePlayerId = userId;
-        whitePlayerElo = user.elo;
-    } else if (colorChoice === 'black') {
-        blackPlayerId = userId;
-        blackPlayerElo = user.elo;
-    } else {
-        if (Math.random() > 0.5) {
+        if (colorChoice === 'white' || (colorChoice === 'random' && matchedPlayer.colorChoice !== 'white')) {
             whitePlayerId = userId;
+            blackPlayerId = matchedPlayer.userId;
             whitePlayerElo = user.elo;
+            blackPlayerElo = matchedPlayer.elo;
         } else {
+            whitePlayerId = matchedPlayer.userId;
             blackPlayerId = userId;
+            whitePlayerElo = matchedPlayer.elo;
             blackPlayerElo = user.elo;
         }
+
+        // Create game session
+        await GameSession.create({
+            gameId: game.id,
+            whitePlayerId,
+            blackPlayerId,
+            whitePlayerElo,
+            blackPlayerElo,
+            startTime: new Date(),
+            endTime: null,
+            result: GameResult.inProgress,
+            status: GameStatus.active,
+            playMode,
+            timeLimit: (playMode === PlayMode.bullet ? 1 : playMode === PlayMode.blitz ? 3 : 10) * 60 * 1000,
+            moves: []
+        });
+
+        return {
+            gameId: game.id,
+            matchedPlayer: {
+                userId: matchedPlayer.userId,
+                socketId: matchedPlayer.socketId
+            }
+        };
     }
 
-    await GameSession.create({
-        gameId: game.id,
-        whitePlayerId,
-        blackPlayerId,
-        whitePlayerElo,
-        blackPlayerElo,
-        startTime: new Date(),
-        endTime: null,
-        result: GameResult.inProgress,
-        status: GameStatus.waiting,
-        playMode,
-        timeLimit: timeLimit * 60 * 1000,
-        moves: []
-    });
+    // No match found, player remains in queue
+    return null;
+}
 
-    return game.id;
+// Remove player from matchmaking queue
+export const removeFromMatchmaking = (userId: string) => {
+    const index = matchmakingQueue.findIndex(p => p.userId === userId);
+    if (index !== -1) {
+        matchmakingQueue.splice(index, 1);
+    }
 }
 
 export const updateElo = async (prisma: PrismaClient, gameId: string, winnerId: string | null) => {

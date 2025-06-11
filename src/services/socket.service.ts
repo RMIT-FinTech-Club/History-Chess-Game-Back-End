@@ -238,90 +238,111 @@ export const handleSocketConnection = async (socket: Socket, io: SocketIOServer,
         socket.emit('onlineUsers', users);
     });
 
+    // Handle find match request
+    socket.on('findMatch', async ({ userId, playMode, colorChoice }) => {
+        try {
+            const result = await GameService.findMatch(
+                fastify.prisma,
+                userId,
+                playMode,
+                colorChoice,
+                socket.id
+            );
+
+            if (result) {
+                // Match found, notify both players
+                const { gameId, matchedPlayer } = result;
+                
+                // Notify the matched player
+                io.to(matchedPlayer.socketId).emit('matchFound', {
+                    gameId,
+                    playMode,
+                    colorChoice
+                });
+
+                // Notify the current player
+                socket.emit('matchFound', {
+                    gameId,
+                    playMode,
+                    colorChoice
+                });
+            } else {
+                // No match found, player is in queue
+                socket.emit('inQueue', {
+                    message: 'Waiting for opponent...'
+                });
+            }
+        } catch (error) {
+            console.error('Error in findMatch:', error);
+            socket.emit('error', { message: 'Failed to find match' });
+        }
+    });
+
+    // Handle cancel matchmaking
+    socket.on('cancelMatchmaking', ({ userId }) => {
+        GameService.removeFromMatchmaking(userId);
+        socket.emit('matchmakingCancelled');
+    });
+
     // Handle join game with specific Game ID and User ID
     socket.on('joinGame', async ({ gameId, userId }) => {
-        let session: InMemoryGameSession | null = gameSessions.get(gameId) as InMemoryGameSession
+        let session: InMemoryGameSession | null = gameSessions.get(gameId) as InMemoryGameSession;
         console.log("Joining game with ID:", gameId);
-        console.log("Current game sessions before join:", Array.from(gameSessions.keys()));
         
         // Get the game session from database
-        const gameDoc = await GameSession.findOne({ gameId })
+        const gameDoc = await GameSession.findOne({ gameId });
 
         // Check if the game session existed in the database
-        if (!gameDoc) {
-            console.log("Game not found in database:", gameId);
-            socket.emit('error', { message: 'Game not found' });
+        if (!gameDoc || !gameDoc.whitePlayerId || !gameDoc.blackPlayerId) {
+            console.log("Game not found in database or missing player information:", gameId);
+            socket.emit('error', { message: 'Game not found or invalid' });
             return;
         }
 
-        // If the created game not in the system current session then create new game session
+        // If the game not in the system current session then create new game session
         if (!session) {
             console.log("Creating new game session for:", gameId);
             session = {
                 gameId,
-                players: [userId],
+                players: [gameDoc.whitePlayerId, gameDoc.blackPlayerId], // Set players in correct order
                 playerSockets: [socket],
                 chess: new Chess(),
-                status: gameDoc.status === GameStatus.pending || gameDoc.status === GameStatus.waiting ? GameStatus.waiting : GameStatus.active,
+                status: GameStatus.active,
                 whiteTimeLeft: gameDoc.whiteTimeLeft || gameDoc.timeLimit,
                 blackTimeLeft: gameDoc.blackTimeLeft || gameDoc.timeLimit,
                 gameState: ''
             };
             gameSessions.set(gameId, session);
-            console.log("Game sessions after adding new session:", Array.from(gameSessions.keys()));
-        }
-    
-        // If the join player not in the system current session 
-        if (session && session.players.length < 2 && !session.players.includes(userId)) {
-            // Add joined player to the session
-            session.players.push(userId)
-
-            // Check if the joined player belong to black or white
-            if (gameDoc.whitePlayerId && !gameDoc.blackPlayerId) {
-                // In case the joined player is belong to black side
-                await GameSession.updateOne(
-                    { gameId },
-                    { $set: { blackPlayerId: userId, status: GameStatus.active } }
-                )
-                session.status = GameStatus.active;
-            } else if (gameDoc.blackPlayerId && !gameDoc.whitePlayerId) {
-                // In case the joined player is belong to white side
-                await GameSession.updateOne(
-                    { gameId },
-                    { $set: { whitePlayerId: userId, status: GameStatus.active } }
-                )
-                session.status = GameStatus.active;
-            } else if (!gameDoc.whitePlayerId && !gameDoc.blackPlayerId) {
-                // Edge case: No players assigned yet (shouldn't happen), default to Black for second player
-                await GameSession.updateOne(
-                    { gameId },
-                    { $set: { blackPlayerId: userId, status: GameStatus.active } }
-                )
-                session.status = GameStatus.active
-            }
-        } else if (!session.players.includes(userId)) {
-            // The game session is already full
-            socket.emit('error', { message: 'Game full' });
-            return;
         }
 
-        // Store info for reconnect
-        socket.data = { gameId, userId }
-        // Send the user to the room
+        // Join the game room
         socket.join(gameId);
-        if (session && session.status === GameStatus.active) startTimer(session, io, fastify);
-        // Send game state to the room => both players can receive
-        io.to(gameId).emit('gameState', {
-            ...getGameState(session),
-            moves: gameDoc.moves,
-            playMode: gameDoc.playMode,
-            timeLimit: gameDoc.timeLimit
-        });
+        
+        // Send current game state to the joining player
+        if (session) {
+            const gameState = {
+                ...getGameState(session),
+                playerColor: userId === gameDoc.whitePlayerId ? 'white' : 'black'
+            };
+            socket.emit('gameState', gameState);
 
-
-        // console.log('Join game:', gameId, userId)
-
-    })
+            // If both players have joined, start the game
+            if (session.playerSockets.length === 2) {
+                startTimer(session, io, fastify);
+                
+                // Notify both players that the game is starting
+                io.to(gameId).emit('gameStart', {
+                    gameId: gameId,
+                    initialGameState: session.chess.fen(),
+                    players: session.players,
+                    whiteTimeLeft: session.whiteTimeLeft,
+                    blackTimeLeft: session.blackTimeLeft,
+                    whitePlayerId: gameDoc.whitePlayerId,
+                    blackPlayerId: gameDoc.blackPlayerId
+                });
+            }
+        }
+    });
 
     // Handle move from client side
     socket.on('move', async ({ gameId, move, userId }) => {
