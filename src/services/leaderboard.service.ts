@@ -18,6 +18,7 @@ export const getLeaderboardService = {
           select: {
             id: true,
             username: true,
+            avatarUrl: true,
             elo: true,
           },
           orderBy: orderBy,
@@ -38,6 +39,7 @@ export const getLeaderboardService = {
         rank: offset + index + 1,
         id: user.id,
         username: user.username,
+        avatarUrl: user.avatarUrl,
         elo: user.elo,
       }));
 

@@ -4,6 +4,7 @@ export interface LeaderboardEntry {
   rank: number; // Calculated rank
   id: string;
   username: string;
+  avatarUrl: string | null;
   elo: number;
   // wins: number;
   // losses: number;
@@ -26,12 +27,13 @@ const leaderboardEntrySchema = {
     rank: { type: "integer", description: "User rank based on ELO" },
     id: userProperties.id, 
     username: userProperties.username,
+    avatarUrl: userProperties.avatarUrl,
     elo: userProperties.elo,
     // wins: { type: "integer", description: "Total wins" },
     // losses: { type: "integer", description: "Total losses" },
     // draws: { type: "integer", description: "Total draws" },
   },
-  required: ["rank", "id", "username", "elo"],
+  required: ["rank", "id", "username", 'avatarUrl', "elo"],
   additionalProperties: false,
 };
 
