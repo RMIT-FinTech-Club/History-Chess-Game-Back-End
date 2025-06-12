@@ -102,25 +102,29 @@ server.register(import('@fastify/swagger-ui'), {
   transformStaticCSP: (header) => header,
 });
 
+
+
+
+
+///
+
+
 // Register plugins
-server.register(neonPlugin);
-server.register(mongodbPlugin);
-server.register(websocketPlugin);
-server.register(prismaPlugin);
+server.register(mongodbPlugin)
+server.register(neonPlugin)
+server.register(websocketPlugin)
+server.register(prismaPlugin)
+// server.register(gameRoutes)
 
-// Register routes
+//Register Routes
 server.register(userRoutes);
-server.register(gameRoutes);
+server.register(gameRoutes, { prefix: '/game' })
 
-let io: SocketIOServer;
+
+
+
 
 server.ready(() => {
-  io = new SocketIOServer(server.server, {
-    cors: {
-      origin: 'http://localhost:3000',
-      methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    },
-  });
 
   server.log.info('Server is ready!');
   server.log.info('All registered routes:');
