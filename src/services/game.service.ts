@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { GameSession, IGameSession } from '../models/GameSession';
 import { PlayMode, GameResult, GameStatus } from '../types/enum';
 import { InMemoryGameSession, WaitingPlayer } from '../types/game.types';
+import {CustomSocket} from '../types/socket.types';
 
 export const createGame = async (
     prisma: PrismaClient,
@@ -454,11 +455,20 @@ const pendingChallenges: Map<string, {
 export const challengeUser = async (
     prisma: PrismaClient,
     io: SocketIOServer,
-    challengerSocket: Socket,
+    challengerSocket: CustomSocket,
     opponentId: string,
     playMode: PlayMode,
     colorPreference: 'white' | 'black' | 'random'
 ): Promise<{ success: boolean; message: string }> => {
+
+    if (!challengerSocket.data.userId) {
+        return { success: false, message: 'Challenger not identified' };
+    }
+
+    if (!opponentId) {
+        return { success: false, message: 'Opponent not identified' };
+    }
+
     // Check if both users exist
     const [challenger, opponent] = await Promise.all([
         prisma.users.findUnique({ where: { id: challengerSocket.data.userId } }),
@@ -517,7 +527,7 @@ export const challengeUser = async (
 export const respondToChallenge = async (
     prisma: PrismaClient,
     io: SocketIOServer,
-    opponentSocket: Socket,
+    opponentSocket: CustomSocket,
     accept: boolean
 ): Promise<{ success: boolean; message: string; gameId?: string }> => {
     const challenge = Array.from(pendingChallenges.values())

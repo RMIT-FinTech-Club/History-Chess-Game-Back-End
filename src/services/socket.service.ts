@@ -4,6 +4,7 @@ import fastify, { FastifyInstance } from "fastify"
 import { GameSession, IGameSession } from "../models/GameSession"
 import { GameStatus, PlayMode } from '../types/enum'
 import { InMemoryGameSession } from '../types/game.types';
+import { CustomSocket } from '../types/socket.types';
 import * as GameService from "./game.service"
 
 const gameSessions = new Map<string, InMemoryGameSession>();
@@ -173,12 +174,15 @@ export const handleMove = async (socket: Socket, io: SocketIOServer, fastify: Fa
 }
 
 // Handle all the socket connection after successfully connected
-export const handleSocketConnection = async (socket: Socket, io: SocketIOServer, fastify: FastifyInstance) => {
+export const handleSocketConnection = async (socket: CustomSocket, io: SocketIOServer, fastify: FastifyInstance) => {
     console.log('New client connected:', socket.id);
 
     // Track user connection
     socket.on('identify', (userId: string) => {
         if (!userId) return;
+        
+        // Set the userId in socket data
+        socket.data.userId = userId;
         
         // Remove user from any previous connections
         for (const [id, user] of onlineUsers.entries()) {
