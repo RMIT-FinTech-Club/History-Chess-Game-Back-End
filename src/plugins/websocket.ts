@@ -11,7 +11,12 @@ const websocketPlugin: FastifyPluginAsync = fp(async (fastify: FastifyInstance) 
         cors: {
             origin: "http://localhost:3000",
             methods: ["GET", "POST", "PUT", "DELETE"]
-        }
+        },
+
+        pingTimeout: 50000, 
+        pingInterval: 25000, 
+        connectTimeout: 45000,
+       
     });
 
     io.on('connection', (socket) => handleSocketConnection(socket, io, fastify))
