@@ -4,7 +4,7 @@ import { uploadController, AvatarRequest } from '../controllers/upload.controlle
 import {
   createUserSchema,
   getUserSchema,
-  updateUserSchema,
+  updateAuthenticatedProfileSchema,
   deleteUserSchema,
   getAllUsersSchema,
   updateProfileSchema,
@@ -28,6 +28,12 @@ export default async function userRoutes(fastify: FastifyInstance) {
   fastify.get('/users/profile', {
     preHandler: authMiddleware,
     handler: userController.getProfile.bind(userController),
+  });
+
+  fastify.put('/users/profile', {
+    schema: updateAuthenticatedProfileSchema, // Use the correct schema
+    preHandler: authMiddleware,
+    handler: userController.updateAuthenticatedProfile.bind(userController),
   });
 
   fastify.get('/users', {
