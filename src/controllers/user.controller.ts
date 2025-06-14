@@ -6,6 +6,10 @@ interface IdParams {
   id: string;
 }
 
+interface AuthenticatedProfileRequest {
+  Body: UpdateProfileInput;
+}
+
 interface QueryParams {
   limit?: number;
   offset?: number;
@@ -356,4 +360,72 @@ export default class UserController {
       reply.status(500).send({ message: error.message });
     }
   }
+
+  async updateAuthenticatedProfile(
+  request: FastifyRequest,
+  reply: FastifyReply
+  ): Promise<void> {
+    try {
+      const userId = (request as any).user?.id;
+      console.log('Extracted userId:', userId);
+
+      if (!userId) {
+        console.log('No userId found, returning 401');
+        reply.status(401).send({ message: 'Authentication required' });
+        return;
+      }
+
+      // Handle the case where request.body might be undefined or not an object
+      const body = request.body as any;
+      
+      if (!body || typeof body !== 'object') {
+        console.log('Invalid or missing request body:', body);
+        reply.status(400).send({ message: 'Invalid request body' });
+        return;
+      }
+
+      const { username, avatarUrl } = body;
+      console.log('Extracted from body - username:', username, 'avatarUrl:', avatarUrl);
+
+      // Check if at least one field is provided
+      if (username === undefined && avatarUrl === undefined) {
+        console.log('No valid fields provided in request');
+        reply.status(400).send({ message: 'At least one field (username or avatarUrl) must be provided' });
+        return;
+      }
+
+      // Create update object with only defined values
+      const updateData: any = {};
+      if (username !== undefined) updateData.username = username;
+      if (avatarUrl !== undefined) updateData.avatarUrl = avatarUrl;
+      
+      console.log('Update data to send to service:', updateData);
+
+      // Call the service to update the profile
+      console.log('Calling userService.updateProfile...');
+      const updatedUser = await this.userService.updateProfile(userId, updateData);
+      console.log('Service response:', updatedUser);
+
+      if (!updatedUser) {
+        console.log('No updated user returned, sending 404');
+        reply.status(404).send({ message: 'User not found' });
+        return;
+      }
+
+      console.log('Sending success response');
+      reply.status(200).send(updatedUser);
+    } catch (error: any) {
+      console.log('=== ERROR IN UPDATE PROFILE ===');
+      console.log('Error:', error);
+      console.log('Error message:', error.message);
+      console.log('Error stack:', error.stack);
+      request.log.error(error);
+      
+      if (error.message.includes('Username already taken')) {
+        reply.status(409).send({ message: 'This username already exists, please choose another username.' });
+      } else {
+        reply.status(500).send({ message: 'Internal server error', error: error.message });
+      }
+    }
+    }
 }

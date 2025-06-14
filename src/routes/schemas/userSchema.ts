@@ -120,27 +120,43 @@ export const updateProfileSchema = {
   },
 };
 
-export const updateUserSchema = {
-  tags: ['user'],
-  params: {
-    type: 'object',
-    required: ['id'],
-    properties: {
-      id: { type: 'string', format: 'uuid' },
-    },
-  },
+export const updateAuthenticatedProfileSchema = {
+  tags: ['user', 'profile'],
+  summary: 'Update authenticated user profile',
+  description: 'Updates the authenticated user profile information (no user ID required)',
+  security: [{ bearerAuth: [] }],
   body: {
     type: 'object',
     properties: {
-      username: { type: 'string', minLength: 3, maxLength: 50, pattern: '^[a-zA-Z0-9]+$' },
-      email: { type: 'string', format: 'email' },
-      walletAddress: { type: 'string', nullable: true },
-      password: { type: 'string', minLength: 9 },
+      username: {
+        type: 'string',
+        minLength: 3,
+        maxLength: 50,
+        pattern: '^[a-zA-Z0-9]+$',
+        description: 'New username (optional)',
+      },
+      avatarUrl: {
+        type: 'string',
+        nullable: true,
+        description: 'New avatar URL (optional)',
+      },
     },
     additionalProperties: false,
   },
   response: {
-    200: userResponseSchema,
+    200: {
+      type: 'object',
+      properties: {
+        token: { type: 'string' },
+        ...userProperties,
+      },
+    },
+    401: {
+      type: 'object',
+      properties: {
+        message: { type: 'string' },
+      },
+    },
     404: {
       type: 'object',
       properties: {
