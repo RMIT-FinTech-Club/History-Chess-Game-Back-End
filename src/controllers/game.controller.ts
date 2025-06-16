@@ -2,7 +2,8 @@ import { Socket, Server as SocketIOServer } from 'socket.io'
 import * as GameServices from '../services/game.service';
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { createGame, findMatch } from '../services/game.service';
-
+import { PrismaClient } from '@prisma/client';
+import { PlayMode } from '../types/enum';
 
 // export const handleJoinGame = (socket: Socket, io: SocketIOServer, playerElo: number): void => {
 //     GameServices.joinGame(socket, io, playerElo);
@@ -26,35 +27,65 @@ export const createNewGame = async (req: FastifyRequest, res: FastifyReply) => {
 
 // Handle Find Match Request
 export const findNewMatch = async (req: FastifyRequest, res: FastifyReply) => {
-  const { userId, playMode, colorPreference } = req.body as any;
+    const { userId, playMode, colorPreference, socketId } = req.body as any;
+    
+    if (!socketId) {
+        return res.code(400).send({ error: 'Socket ID is required' });
+    }
 
-
-  const gameId = await findMatch(req.server.prisma, userId, playMode, colorPreference);
-
-
-  console.log("\n GAME STARTED\n")
-  return res.code(200).send({ gameId })
+    const result = await findMatch(req.server.prisma, userId, playMode, colorPreference, socketId);
+    console.log("\n MATCHMAKING RESULT\n", result);
+    
+    if (result) {
+        return res.code(200).send(result);
+    } else {
+        return res.code(200).send({ message: 'Added to matchmaking queue' });
+    }
 }
 
-// Handle Challenge Other User Request
-export const challengeUser = async (req: FastifyRequest, res: FastifyReply) => {
-  const { userId, opponentId, playMode, colorPreference } = req.body as any;
+export const handleGameChallenge = async (
+    socket: Socket,
+    io: SocketIOServer,
+    prisma: PrismaClient,
+    data: {
+        opponentId: string,
+        playMode: PlayMode,
+        colorPreference: 'white' | 'black' | 'random'
+    }
+) => {
+    const result = await GameServices.challengeUser(
+        prisma,
+        io,
+        socket,
+        data.opponentId,
+        data.playMode,
+        data.colorPreference
+    );
 
-}
+    if (!result.success) {
+        socket.emit('challengeError', result);
+    }
+};
 
-// export const getUserGameHistory = async (req: FastifyRequest, res: FastifyReply) => {
-//     const { userId } = req.params as any;
-//     const { limit, skip, status, playMode } = req.query as any;
+export const handleChallengeResponse = async (
+    socket: Socket,
+    io: SocketIOServer,
+    prisma: PrismaClient,
+    data: {
+        accept: boolean
+    }
+) => {
+    const result = await GameServices.respondToChallenge(
+        prisma,
+        io,
+        socket,
+        data.accept
+    );
 
-//     try {
-//       const history = await retrieveGameSessions(userId);
-
-//       return res.send(history);
-//     } catch (error) {
-//       console.error("Error retrieving game history:", error);
-//       return res.status(500).send({ error: "Failed to retrieve game history" });
-//     }
-//   };
+    if (!result.success) {
+        socket.emit('challengeError', result);
+    }
+};
 
 export const getUserGameHistory = async ( req: FastifyRequest, res: FastifyReply ) => {
   const { userId } = req.params as any;

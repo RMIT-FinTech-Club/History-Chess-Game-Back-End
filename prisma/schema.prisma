@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -20,11 +14,14 @@ model users {
   hashedPassword String
   walletAddress  String?  @unique
   elo            Int      @default(400)
+  avatarUrl      String? // URL to the avatar image in AWS S3
+  language       String   @default("en")
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+  googleAuth    Boolean  @default(false)
 
   ownedNFTs nfts[]
-  games games[]
+  games     games[]
 }
 
 model nfts {
@@ -37,9 +34,9 @@ model nfts {
 }
 
 model games {
-  id             String   @unique @default(uuid())
-  userId         String
-  user           users    @relation(fields: [userId], references: [id])
-  createdAt      DateTime @default(now())
-  status         String   @default("active")
+  id        String   @unique @default(uuid())
+  userId    String
+  user      users    @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+  status    String   @default("active")
 }
