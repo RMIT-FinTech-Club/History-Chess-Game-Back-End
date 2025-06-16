@@ -397,9 +397,17 @@ export const handleSocketConnection = async (socket: CustomSocket, io: SocketIOS
                 if (session && session.status === GameStatus.paused) {
                     await endGame(fastify, session, io, `${userId === session.players[0] ? 'Black' : 'White'} wins by disconnect`)
                 }
-            }, 3000);
+            }, 30000);
         }
     })
+    
+    socket.on('leaveGame', async ({ gameId, userId }) => {
+        const session = gameSessions.get(gameId);
+        if (session && session.players.includes(userId)) {
+            const winner = userId === session.players[0] ? 'Black' : 'White';
+            await endGame(fastify, session, io, `${winner} wins by forfeit`);
+        }
+    });
 }
 
 
