@@ -303,20 +303,42 @@ export const handleSocketConnection = async (socket: CustomSocket, io: SocketIOS
             return;
         }
 
+        // Check if this is a rejoin (session exists) or new join
+        const isRejoin = !!session;
+
         // If the game not in the system current session then create new game session
         if (!session) {
             console.log("Creating new game session for:", gameId);
+            
+            // Get move history from database to restore game state
+            const moves = await GameService.getGameMoves(gameId);
+            const chess = new Chess();
+            
+            // Replay moves to get current position
+            if (moves && moves.length > 0) {
+                try {
+                    moves.forEach(moveData => chess.move(moveData.move));
+                } catch (error) {
+                    console.error("Error replaying moves:", error);
+                }
+            }
+            
             session = {
                 gameId,
                 players: [gameDoc.whitePlayerId, gameDoc.blackPlayerId], // Set players in correct order
                 playerSockets: [socket],
-                chess: new Chess(),
+                chess: chess, // Use the chess instance with moves replayed
                 status: GameStatus.active,
                 whiteTimeLeft: gameDoc.whiteTimeLeft || gameDoc.timeLimit,
                 blackTimeLeft: gameDoc.blackTimeLeft || gameDoc.timeLimit,
                 gameState: ''
             };
             gameSessions.set(gameId, session);
+        } else {
+            // Add socket to existing session if not already there
+            if (!session.playerSockets.find(s => s.id === socket.id)) {
+                session.playerSockets.push(socket);
+            }
         }
 
         // Join the game room
@@ -330,8 +352,20 @@ export const handleSocketConnection = async (socket: CustomSocket, io: SocketIOS
             };
             socket.emit('gameState', gameState);
 
-            // If both players have joined, start the game
-            if (session.playerSockets.length === 2) {
+            // Send move history for rejoining players
+            if (isRejoin) {
+                const moves = await GameService.getGameMoves(gameId);
+                if (moves && moves.length > 0) {
+                    socket.emit('moveHistory', { moves });
+                }
+            }
+
+            // Check if both players are connected
+            const connectedPlayers = new Set(session.playerSockets.map(s => s.data?.userId || ''));
+            const bothPlayersConnected = session.players.every(playerId => connectedPlayers.has(playerId));
+
+            if (bothPlayersConnected && !isRejoin) {
+                // This is a truly new game start
                 startTimer(session, io, fastify);
                 
                 // Notify both players that the game is starting
@@ -342,8 +376,16 @@ export const handleSocketConnection = async (socket: CustomSocket, io: SocketIOS
                     whiteTimeLeft: session.whiteTimeLeft,
                     blackTimeLeft: session.blackTimeLeft,
                     whitePlayerId: gameDoc.whitePlayerId,
-                    blackPlayerId: gameDoc.blackPlayerId
+                    blackPlayerId: gameDoc.blackPlayerId,
+                    isNewGame: true // Flag to indicate this is a new game
                 });
+            } else if (bothPlayersConnected && isRejoin) {
+                // Game is resuming
+                if (session.status === GameStatus.paused) {
+                    session.status = GameStatus.active;
+                    startTimer(session, io, fastify);
+                }
+                io.to(gameId).emit('gameResumed', { message: 'Game resumed' });
             }
         }
     });
@@ -354,11 +396,17 @@ export const handleSocketConnection = async (socket: CustomSocket, io: SocketIOS
     })
 
     // Handle rejoin game
-    socket.on('rejoinGame', ({ gameId, userId }) => {
+    socket.on('rejoinGame', async ({ gameId, userId }) => {
         const session = gameSessions.get(gameId);
         if (session && session.players.includes(userId)) {
             socket.data = { gameId, userId }
             socket.join(gameId)
+
+            // Send move history to rejoining player
+            const moves = await GameService.getGameMoves(gameId);
+            if (moves && moves.length > 0) {
+                socket.emit('moveHistory', { moves });
+            }
 
             if (session && session.players.length === 2 && session.status === GameStatus.paused) {
                 session.status = GameStatus.active;
@@ -397,9 +445,17 @@ export const handleSocketConnection = async (socket: CustomSocket, io: SocketIOS
                 if (session && session.status === GameStatus.paused) {
                     await endGame(fastify, session, io, `${userId === session.players[0] ? 'Black' : 'White'} wins by disconnect`)
                 }
-            }, 3000);
+            }, 30000);
         }
     })
+    
+    socket.on('leaveGame', async ({ gameId, userId }) => {
+        const session = gameSessions.get(gameId);
+        if (session && session.players.includes(userId)) {
+            const winner = userId === session.players[0] ? 'Black' : 'White';
+            await endGame(fastify, session, io, `${winner} wins by forfeit`);
+        }
+    });
 }
 
 
