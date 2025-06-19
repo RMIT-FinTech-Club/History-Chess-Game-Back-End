@@ -675,6 +675,19 @@ export const respondToChallenge = async (
     }
 };
 
+export const getGameMoves = async (gameId: string) => {
+    try {
+        const gameSession = await GameSession.findOne({ gameId });
+        if (!gameSession) {
+            return [];
+        }
+        return gameSession.moves || [];
+    } catch (error) {
+        console.error('Error getting game moves:', error);
+        return [];
+    }
+};
+
 
 /**
  * Retrieve game history for a specific user without loading moves
