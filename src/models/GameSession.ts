@@ -8,7 +8,7 @@ export interface IGameSession {
     startTime: Date;
     endTime: Date | null;
     result: GameResult;
-    winner: string | null; 
+    winner: string | null;
     status: GameStatus;
     playMode: PlayMode;
     timeLimit: number;
@@ -17,6 +17,8 @@ export interface IGameSession {
     finalFen: string | null;
     whiteTimeLeft?: number;
     blackTimeLeft?: number;
+    whiteAccuracyPoint: number | 0;
+    blackAccuracyPoint: number | 0;
     analysisCompleted?: boolean;
     analysisDate?: Date;
 }
@@ -24,13 +26,21 @@ export interface IGameSession {
 export interface IMove {
     moveNumber: number;
     move: string;
-    fen?: string;
-    evaluation: number;
+    fen: string;
+    evaluation: number | null;
     bestmove: string;
-    mate?: number;
-    continuation?: string; 
-    color: 'white' | 'black';
+    mate: number | null;
+    continuation?: string;
+    playerColor: 'w' | 'b';
     playerId: string;
+    initialEvalCP: number,
+    moveEvalCP: number, 
+    initialExpectedPoints: number,
+    moveExpectedPoints: number, 
+    bestMoveExpectedPoints: number,
+    expectedPointsLost: number, 
+    classification?: string,
+    error?: string
 }
 
 const MoveSchema = new Schema<IMove>({
@@ -41,8 +51,16 @@ const MoveSchema = new Schema<IMove>({
     bestmove: { type: String, required: true },
     mate: { type: Number, required: false, default: null },
     continuation: { type: String, required: false },
-    color: { type: String, required: true, enum: ['white', 'black'] },
-    playerId: { type: String, required: true }
+    playerColor: { type: String, required: true, enum: ['w', 'b'] },
+    playerId: { type: String, required: true },
+    initialEvalCP: { type: Number, required: true },
+    moveEvalCP: { type: Number, required: true }, 
+    initialExpectedPoints: { type: Number, required: true },
+    moveExpectedPoints: { type: Number, required: true }, 
+    bestMoveExpectedPoints: { type: Number, required: true },
+    expectedPointsLost: { type: Number, required: true }, 
+    classification: { type: String, required: false },
+    error: { type: String, required: false }
 });
 
 const GameSessionSchema = new Schema<IGameSession>({
@@ -52,7 +70,7 @@ const GameSessionSchema = new Schema<IGameSession>({
     startTime: { type: Date, required: true, default: Date.now },
     endTime: { type: Date, default: null },
     result: { type: String, default: '*', enum: ['*', '1-0', '0-1', '1/2-1/2'] },
-    winner: { type: String, default: null }, 
+    winner: { type: String, default: null },
     status: { type: String, required: true, enum: ['waiting', 'pending', 'active', 'finished'], default: 'waiting' },
     playMode: { type: String, required: true, enum: ['bullet', 'blitz', 'rapid'] },
     timeLimit: { type: Number, required: true },
@@ -61,6 +79,8 @@ const GameSessionSchema = new Schema<IGameSession>({
     finalFen: { type: String, default: null },
     whiteTimeLeft: { type: Number },
     blackTimeLeft: { type: Number },
+    whiteAccuracyPoint: { type: Number, default: 0 },
+    blackAccuracyPoint: { type: Number, default: 0 },
     analysisCompleted: { type: Boolean, default: false },
     analysisDate: { type: Date }
 });
