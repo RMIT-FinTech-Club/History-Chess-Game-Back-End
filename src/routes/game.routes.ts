@@ -1,9 +1,9 @@
 import fastify, { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 import { createNewGame, findNewMatch, getGameHistory, getGameMoves, getGameAnalysis } from "../controllers/game.controller";
 import { stockfishService } from "../services/stockfish.service";
-import { authMiddleware } from "../middleware/auth";
+import { authenticate } from "../middleware/auth";
 
-const preHandler = { preHandler: authMiddleware };
+const preHandler = { preHandler: authenticate };
 
 const gameRoutes: FastifyPluginAsync = async (fastify) => {
     fastify.post('/new', createNewGame);
