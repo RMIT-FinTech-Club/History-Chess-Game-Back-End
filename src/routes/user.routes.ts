@@ -1,4 +1,4 @@
-import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { FastifyInstance, FastifyRequest, FastifyReply, RouteGenericInterface } from 'fastify';
 import UserController from '../controllers/user.controller';
 import { uploadController } from '../controllers/upload.controller';
 import {
@@ -23,10 +23,16 @@ interface UpdateProfileRequest {
   Params: { id: string };
   Body: { username?: string };
 }
+interface ProfileUpdateRoute extends RouteGenericInterface {
+  Body: {
+    username?: string;
+    avatarUrl?: string | null;
+  };
+}
 interface AvatarRequest {
   Params: { id: string };
   Body: { file: any }; // Multipart file
-  Headers: { authorization?: string }; // Matches upload.controller.ts
+  Headers: { authorization?: string };
 }
 
 export default async function userRoutes(fastify: FastifyInstance) {
@@ -34,7 +40,7 @@ export default async function userRoutes(fastify: FastifyInstance) {
 
   fastify.post('/users', {
     schema: createUserSchema,
-    handler: userController.createUser,
+    handler: userController.createUser.bind(userController),
   });
 
   fastify.get('/users/:id', {
@@ -47,13 +53,15 @@ export default async function userRoutes(fastify: FastifyInstance) {
 
   fastify.get('/users/profile', {
     preHandler: authenticate,
-    handler: userController.getProfile,
+    handler: userController.getProfile.bind(userController),
   });
 
   fastify.put('/users/profile', {
     schema: updateAuthenticatedProfileSchema,
     preHandler: authenticate,
-    handler: userController.updateAuthenticatedProfile,
+    handler: async (request: FastifyRequest<ProfileUpdateRoute>, reply: FastifyReply) => {
+      return userController.updateAuthenticatedProfile(request, reply);
+    },
   });
 
   fastify.get('/users', {
@@ -74,7 +82,7 @@ export default async function userRoutes(fastify: FastifyInstance) {
 
   fastify.put('/users/update-password', {
     preHandler: authenticate,
-    handler: userController.updatePassword,
+    handler: userController.updatePassword.bind(userController),
   });
 
   fastify.delete('/users/:id', {
@@ -86,31 +94,31 @@ export default async function userRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post('/users/login', {
-    handler: userController.login,
+    handler: userController.login.bind(userController),
   });
 
   fastify.post('/users/request-reset', {
-    handler: userController.requestPasswordReset,
+    handler: userController.requestPasswordReset.bind(userController),
   });
 
   fastify.post('/users/reset-password', {
-    handler: userController.resetPassword,
+    handler: userController.resetPassword.bind(userController),
   });
 
   fastify.post('/users/verify-reset-code', {
-    handler: userController.verifyResetCode,
+    handler: userController.verifyResetCode.bind(userController),
   });
 
   fastify.get('/users/google-callback', {
-    handler: userController.googleCallback,
+    handler: userController.googleCallback.bind(userController),
   });
 
   fastify.post('/users/complete-google-login', {
-    handler: userController.completeGoogleLogin,
+    handler: userController.completeGoogleLogin.bind(userController),
   });
 
   fastify.post('/users/check-auth-type', {
-    handler: userController.checkAuthType,
+    handler: userController.checkAuthType.bind(userController),
   });
 
   fastify.post('/users/:id/avatar', {

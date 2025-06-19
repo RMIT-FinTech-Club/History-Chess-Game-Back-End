@@ -6,10 +6,6 @@ interface IdParams {
   id: string;
 }
 
-interface AuthenticatedProfileRequest {
-  Body: UpdateProfileInput;
-}
-
 interface QueryParams {
   limit?: number;
   offset?: number;
@@ -54,6 +50,13 @@ interface VerifyResetCodeRequest {
 interface ProfileRequest extends RouteGenericInterface {
   Headers: { authorization?: string };
   authUser?: { id: string; username: string; googleAuth: boolean };
+}
+
+interface ProfileUpdateRoute extends RouteGenericInterface {
+  Body: {
+    username?: string;
+    avatarUrl?: string | null;
+  };
 }
 
 interface UpdateProfileRequest {
@@ -199,7 +202,7 @@ export default class UserController {
   }
 
   async updateAuthenticatedProfile(
-    request: FastifyRequest<AuthenticatedProfileRequest>,
+    request: FastifyRequest<ProfileUpdateRoute>,
     reply: FastifyReply
   ): Promise<void> {
     try {

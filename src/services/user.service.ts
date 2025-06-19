@@ -75,6 +75,10 @@ export class UserService {
         pass: process.env.EMAIL_PASS || 'your-app-password',
       },
     });
+    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    this.logger.error('Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET in environment variables');
+    throw new Error('Google OAuth configuration is incomplete');
+    }
     this.googleClient = new OAuth2Client(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
@@ -706,10 +710,12 @@ export class UserService {
         access_type: 'offline',
         scope: ['profile', 'email'],
         state,
+        prompt: 'consent',
       });
       return authUrl;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`Google auth error: ${message}`);
       throw new Error(message);
     }
   }
@@ -717,6 +723,10 @@ export class UserService {
   async googleCallback(code: string, state: string): Promise<{ email: string; tempToken: string } | { token: string; data: UserProfileResponse }> {
     try {
       this.logger.info(`Received Google callback with code: ${code}, state: ${state}`);
+      if (!code) {
+        this.logger.warn('Missing authorization code in Google callback');
+        throw new Error('Invalid or missing authorization code');
+      }
       const { tokens } = await this.googleClient.getToken(code);
       this.googleClient.setCredentials(tokens);
 
