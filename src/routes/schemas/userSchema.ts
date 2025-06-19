@@ -37,7 +37,13 @@ export const createUserSchema = {
     additionalProperties: false,
   },
   response: {
-    201: userResponseSchema,
+    201: {
+      type: 'object',
+      properties: {
+        token: { type: 'string' },
+        data: userResponseSchema,
+      },
+    },
     409: {
       type: 'object',
       properties: {
@@ -63,7 +69,13 @@ export const getUserSchema = {
     },
   },
   response: {
-    200: userResponseSchema,
+    200: {
+      type: 'object',
+      properties: {
+        token: { type: 'string' },
+        data: userResponseSchema,
+      },
+    },
     404: {
       type: 'object',
       properties: {
@@ -98,7 +110,13 @@ export const updateProfileSchema = {
     additionalProperties: false,
   },
   response: {
-    200: userResponseSchema,
+    200: {
+      type: 'object',
+      properties: {
+        token: { type: 'string' },
+        data: userResponseSchema,
+      },
+    },
     404: {
       type: 'object',
       properties: {
@@ -148,7 +166,7 @@ export const updateAuthenticatedProfileSchema = {
       type: 'object',
       properties: {
         token: { type: 'string' },
-        ...userProperties,
+        data: userResponseSchema,
       },
     },
     401: {
@@ -221,6 +239,7 @@ export const getAllUsersSchema = {
         total: { type: 'integer' },
         limit: { type: 'integer' },
         offset: { type: 'integer' },
+        token: { type: 'string' },
       },
     },
   },
@@ -244,6 +263,7 @@ export const uploadAvatarSchema = {
       properties: {
         message: { type: 'string' },
         avatarUrl: { type: 'string' },
+        token: { type: 'string' },
         user: userResponseSchema,
       },
     },
