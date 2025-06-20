@@ -6,6 +6,7 @@ import jwt from 'jsonwebtoken';
 import nodemailer from 'nodemailer';
 import { OAuth2Client } from 'google-auth-library';
 import * as crypto from 'crypto';
+import basePath from '../types/pathConfig';
 
 const prisma = new PrismaClient();
 
@@ -76,13 +77,13 @@ export class UserService {
       },
     });
     if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
-    this.logger.error('Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET in environment variables');
-    throw new Error('Google OAuth configuration is incomplete');
+      this.logger.error('Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET in environment variables');
+      throw new Error('Google OAuth configuration is incomplete');
     }
     this.googleClient = new OAuth2Client(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
-      'http://localhost:8080/users/google-callback'
+      `${basePath}/users/google-callback`
     );
   }
 
