@@ -11,6 +11,13 @@
     "noImplicitAny": true,
     "moduleResolution": "node"
   },
-  "include": ["src/**/*", "server.ts", "prisma/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "include": [
+    "src/**/*",
+    "server.ts",
+    "prisma/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
 }
