@@ -3,14 +3,13 @@ import { createNewGame, findNewMatch, getGameHistory, getGameMoves, getGameAnaly
 import { stockfishService } from "../services/stockfish.service";
 import { authenticate } from "../middleware/auth";
 
-const preHandler = { preHandler: authenticate };
 
 const gameRoutes: FastifyPluginAsync = async (fastify) => {
     fastify.post('/new', createNewGame);
     fastify.post('/find', findNewMatch);
-    fastify.get('/history/:userId', getGameHistory);
-    fastify.get('/history/detail/:gameId', preHandler, getGameMoves);
-    fastify.get('/analysis/:gameId', getGameAnalysis);
+    fastify.get('/history/:userId', {preHandler: authenticate}, getGameHistory);
+    fastify.get('/history/detail/:gameId', {preHandler: authenticate}, getGameMoves);
+    fastify.get('/analysis/:gameId', {preHandler: authenticate}, getGameAnalysis);
 }
 
 export default gameRoutes;

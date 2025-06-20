@@ -162,6 +162,7 @@ export class UserService {
       this.logger.error(`Invalid UUID for token generation: ${id}`);
       throw new Error('Internal error: invalid user ID');
     }
+    
     return jwt.sign({ id, username, googleAuth } as UserTokenPayload, this.jwtSecret, { expiresIn: '1h', noTimestamp: true });
   }
 
