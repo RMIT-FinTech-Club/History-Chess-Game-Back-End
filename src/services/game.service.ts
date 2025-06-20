@@ -809,7 +809,9 @@ export async function getGameHistories(
 // Get game analysis data
 export const getGameAnalysis = async (gameId: string) => {
     try {
-        const gameSession = await GameSession.findOne({ gameId }).lean();
+        const gameSession = await GameSession.findOne({ gameId })
+        .select('whiteAccuracyPoint blackAccuracyPoint moves')
+        .lean();
         if (!gameSession) {
             throw new Error('Game not found');
         }
@@ -817,9 +819,23 @@ export const getGameAnalysis = async (gameId: string) => {
         if (!gameSession.moves || gameSession.moves.length === 0) {
             throw new Error('No moves found for this game');
         }
-
+        const whiteAccuracy = gameSession.whiteAccuracyPoint;
+        const blackAccuracy = gameSession.blackAccuracyPoint;
+        const moves = gameSession.moves.map(move => ({
+            moveNumber: move.moveNumber,
+            move: move.move,
+            evaluation: move.evaluation,
+            bestmove: move.bestmove.split(' ')[0],
+            mate: move.mate,
+            continuation: move.continuation,
+            playerColor: move.playerColor,
+            classification: move.classification,
+        }));
         return {
-
+            gameId: gameSession.gameId,
+            whiteAccuracy,
+            blackAccuracy,
+            moves
         };
 
     } catch (error) {

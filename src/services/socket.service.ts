@@ -82,7 +82,7 @@ const getGameState = (session: InMemoryGameSession) => {
 }
 
 // const getGameState = (session: GameSessionInterface) => {
-//     return {
+//     return {yy,
 //         fen: session.chess.fen(),
 //         players: session.players,
 //         status: session.status,
