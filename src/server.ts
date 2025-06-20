@@ -25,7 +25,7 @@ const server: FastifyInstance = Fastify({ logger: true });
 
 // Register CORS
 server.register(fastifyCors, {
-  origin: ['http://localhost:3000', "https://history-chess-game-front-end.vercel.app"],
+  origin: ['http://localhost:3000', "https://history-chess-game-front-end.onrender.com"],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
