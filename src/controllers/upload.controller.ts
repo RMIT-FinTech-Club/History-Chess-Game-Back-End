@@ -50,15 +50,14 @@ export const uploadController = {
       });
 
       const userService = new UserService(fastify);
-      const userResult = await userService.getUserById(userId);
-      if (!userResult) {
+      const userResponse = await userService.getUserById(userId);
+      if (!userResponse) {
         reply.status(404).send({ message: 'User not found' });
         return;
       }
-      const { data: user } = userResult;
 
-      if (user.avatarUrl) {
-        const oldKey = user.avatarUrl.split('/').pop();
+      if (userResponse.avatarUrl) {
+        const oldKey = userResponse.avatarUrl.split('/').pop();
         if (oldKey) {
           await s3Client.send(new DeleteObjectCommand({
             Bucket: process.env.AWS_S3_BUCKET_NAME || 'fintech-club-vietnamese-historical-chess-game',
@@ -83,14 +82,16 @@ export const uploadController = {
       const avatarUrl = `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/avatars/${fileName}`;
       request.log.info(`Generated avatar URL: ${avatarUrl}`);
 
-      const updatedUserResult = await userService.updateProfile(userId, { avatarUrl });
-      if (!updatedUserResult) {
+      const updatedUserResponse = await userService.updateProfile(userId, { avatarUrl });
+      if (!updatedUserResponse) {
         reply.status(404).send({ message: 'User not found' });
         return;
       }
-      const { token, data: updatedUser } = updatedUserResult;
 
-      reply.status(200).send({ message: 'Avatar uploaded successfully', avatarUrl, token, user: updatedUser });
+      reply.status(200).send({
+        message: 'Avatar uploaded successfully',
+        ...updatedUserResponse,
+      });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       request.log.error(`S3 upload error: ${message}, code=${error instanceof Error && 'code' in error ? error.code : undefined}, requestId=${error instanceof Error && 'requestId' in error ? error.requestId : undefined}`);
@@ -115,15 +116,14 @@ export const uploadController = {
       }
 
       const userService = new UserService(fastify);
-      const userResult = await userService.getUserById(userId);
-      if (!userResult) {
+      const userResponse = await userService.getUserById(userId);
+      if (!userResponse) {
         reply.status(404).send({ message: 'User not found' });
         return;
       }
-      const { data: user } = userResult;
 
-      if (user.avatarUrl) {
-        const oldKey = user.avatarUrl.split('/').pop();
+      if (userResponse.avatarUrl) {
+        const oldKey = userResponse.avatarUrl.split('/').pop();
         if (oldKey) {
           const s3Client = new S3Client({
             region: process.env.AWS_REGION || 'ap-southeast-2',
@@ -141,14 +141,13 @@ export const uploadController = {
         }
       }
 
-      const updatedUserResult = await userService.updateProfile(userId, { avatarUrl: null });
-      if (!updatedUserResult) {
+      const updatedUserResponse = await userService.updateProfile(userId, { avatarUrl: null });
+      if (!updatedUserResponse) {
         reply.status(404).send({ message: 'User not found' });
         return;
       }
-      const { token, data: updatedUser } = updatedUserResult;
 
-      reply.status(200).send({ message: 'Avatar deleted successfully', token, user: updatedUser });
+      reply.status(200).send({ message: 'Avatar deleted successfully', ...updatedUserResponse });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       request.log.error(`Delete avatar error: ${message}`);

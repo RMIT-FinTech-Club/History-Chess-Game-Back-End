@@ -15,17 +15,14 @@ import gameRoutes from './routes/game.routes';
 import * as GameController from './controllers/game.controller';
 import * as GameService from './services/game.service';
 import { PrismaClient } from '@prisma/client';
-import basePath from './types/pathConfig';
 
 dotenv.config();
-
-const port: number = parseInt(process.env.PORT || '8080', 10)
 
 const server: FastifyInstance = Fastify({ logger: true });
 
 // Register CORS
 server.register(fastifyCors, {
-  origin: ['http://localhost:3000', "https://history-chess-game-front-end.onrender.com"],
+  origin: 'http://localhost:3000',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
@@ -49,7 +46,7 @@ server.register(fastifyOAuth2, {
     auth: fastifyOAuth2.GOOGLE_CONFIGURATION,
   },
   startRedirectPath: '/users/google-auth',
-  callbackUri: `${basePath}/users/google-callback`,
+  callbackUri: 'http://localhost:8080/users/google-callback',
 });
 
 // Register multipart for file uploads
@@ -105,6 +102,13 @@ server.register(import('@fastify/swagger-ui'), {
   transformStaticCSP: (header) => header,
 });
 
+
+
+
+
+///
+
+
 // Register plugins
 server.register(mongodbPlugin)
 server.register(neonPlugin)
@@ -116,17 +120,21 @@ server.register(prismaPlugin)
 server.register(userRoutes);
 server.register(gameRoutes, { prefix: '/game' })
 
+
+
+
+
 server.ready(() => {
 
   server.log.info('Server is ready!');
   server.log.info('All registered routes:');
   server.log.info(server.printRoutes());
 
-
+  
 
   // io.on('connection', (socket: Socket) => {
   //   server.log.info(`Socket connected: ${socket.id}`);
-
+    
   //   // Keep messageFromClient handler commented out but intact
   //   // socket.on('messageFromClient', (data: string) => {
   //   //   server.log.info(`Received message from client ${socket.id}: ${data}`);
@@ -154,7 +162,7 @@ server.ready(() => {
   // });
 
 
-
+  
 });
 
 
@@ -183,8 +191,8 @@ const start = async () => {
   try {
     await postgresPrisma.$connect();
     server.log.info('Connected to NeonDB via Prisma');
-    await server.listen({ port: port, host: '0.0.0.0' });
-    server.log.info(`Server running on ${basePath}`);
+    await server.listen({ port: 8080, host: '0.0.0.0' });
+    server.log.info(`Server running on http://localhost:8080`);
   } catch (err) {
     server.log.error(err);
     process.exit(1);
