@@ -14,13 +14,28 @@ export const userProperties = {
 
 export const userResponseSchema = {
   type: 'object',
-  properties: userProperties,
+  properties: {
+    token: { type: 'string' },
+    id: { type: 'string', format: 'uuid' },
+    username: { type: 'string' },
+    email: { type: 'string', format: 'email' },
+    walletAddress: { type: 'string', nullable: true },
+    avatarUrl: { type: 'string', nullable: true },
+    language: { type: 'string', enum: ['en', 'vi'] },
+    elo: { type: 'integer' },
+    createdAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time' },
+  },
   additionalProperties: false,
 };
 
 export const userArrayResponseSchema = {
   type: 'array',
-  items: userResponseSchema,
+  items: {
+    type: 'object',
+    properties: userProperties,
+    additionalProperties: false,
+  },
 };
 
 export const createUserSchema = {
@@ -37,13 +52,7 @@ export const createUserSchema = {
     additionalProperties: false,
   },
   response: {
-    201: {
-      type: 'object',
-      properties: {
-        token: { type: 'string' },
-        data: userResponseSchema,
-      },
-    },
+    201: userResponseSchema,
     409: {
       type: 'object',
       properties: {
@@ -69,13 +78,7 @@ export const getUserSchema = {
     },
   },
   response: {
-    200: {
-      type: 'object',
-      properties: {
-        token: { type: 'string' },
-        data: userResponseSchema,
-      },
-    },
+    200: userResponseSchema,
     404: {
       type: 'object',
       properties: {
@@ -110,13 +113,7 @@ export const updateProfileSchema = {
     additionalProperties: false,
   },
   response: {
-    200: {
-      type: 'object',
-      properties: {
-        token: { type: 'string' },
-        data: userResponseSchema,
-      },
-    },
+    200: userResponseSchema,
     404: {
       type: 'object',
       properties: {
@@ -162,13 +159,7 @@ export const updateAuthenticatedProfileSchema = {
     additionalProperties: false,
   },
   response: {
-    200: {
-      type: 'object',
-      properties: {
-        token: { type: 'string' },
-        data: userResponseSchema,
-      },
-    },
+    200: userResponseSchema,
     401: {
       type: 'object',
       properties: {
@@ -262,9 +253,16 @@ export const uploadAvatarSchema = {
       type: 'object',
       properties: {
         message: { type: 'string' },
-        avatarUrl: { type: 'string' },
         token: { type: 'string' },
-        user: userResponseSchema,
+        id: { type: 'string', format: 'uuid' },
+        username: { type: 'string' },
+        email: { type: 'string', format: 'email' },
+        walletAddress: { type: 'string', nullable: true },
+        avatarUrl: { type: 'string', nullable: true },
+        language: { type: 'string', enum: ['en', 'vi'] },
+        elo: { type: 'integer' },
+        createdAt: { type: 'string', format: 'date-time' },
+        updatedAt: { type: 'string', format: 'date-time' },
       },
     },
     400: {

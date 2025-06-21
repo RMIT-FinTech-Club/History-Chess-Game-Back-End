@@ -1,10 +1,10 @@
 {
   "name": "history-chess-game-back-end",
   "version": "1.0.0",
-  "main": "dist/server.js",
+  "main": "server.ts",
   "scripts": {
-    "postinstall": "prisma generate --schema=src/prisma/schema.prisma",
-    "start": "node dist/server.js",
+    "postinstall": "prisma generate",
+    "start": "ts-node src/server.ts",
     "dev": "nodemon --exec ts-node src/server.ts",
     "build": "tsc --build",
     "prisma:generate": "npx prisma generate --schema=prisma/schema1.prisma",
