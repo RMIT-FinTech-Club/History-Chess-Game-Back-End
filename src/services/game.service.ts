@@ -51,7 +51,7 @@ export const createGame = async (
 }
 
 // Update move from player
-export const saveMove = async (gameId: string, move: string, moveNumber: number, color: 'white' | 'black', playerId: string) => {
+export const saveMove = async (gameId: string, move: string, moveNumber: number, color: 'white' | 'black', playerId: string, moveDuration: number) => {
     await GameSession.updateOne(
         { gameId },
         { 
@@ -60,7 +60,9 @@ export const saveMove = async (gameId: string, move: string, moveNumber: number,
                     moveNumber, 
                     move,
                     color,
-                    playerId 
+                    playerId,
+                    timestamp: new Date(),
+                    duration: moveDuration / 1000
                 } 
             } 
         }

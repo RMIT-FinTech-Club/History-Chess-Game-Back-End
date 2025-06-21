@@ -12,6 +12,7 @@ export interface InMemoryGameSession {
     blackTimeLeft: number;
     gameState: string;
     timer?: NodeJS.Timeout;
+    lastMoveTime?: number; 
 }
 
 export interface WaitingPlayer {

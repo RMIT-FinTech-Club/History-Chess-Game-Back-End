@@ -104,13 +104,18 @@ export const handleMove = async (socket: Socket, io: SocketIOServer, fastify: Fa
     }
 
     try {
+        // Calculate move duration
+        const now = Date.now();
+        const moveDuration = session.lastMoveTime ? now - session.lastMoveTime : 0;
+        
         // Make the move in memory
         session.chess.move(move);
     
         // Save the move to the database with player color and ID
         const moveNumber = session.chess.history().length;
         const color = isWhiteTurn ? 'white' : 'black';
-        await GameService.saveMove(gameId, move, moveNumber, color, currentPlayerId);
+        await GameService.saveMove(gameId, move, moveNumber, color, currentPlayerId, moveDuration);
+        session.lastMoveTime = now;
     
         // Broadcast the move to all players
         io.to(gameId).emit('gameState', {
@@ -331,7 +336,8 @@ export const handleSocketConnection = async (socket: CustomSocket, io: SocketIOS
                 status: GameStatus.active,
                 whiteTimeLeft: gameDoc.whiteTimeLeft || gameDoc.timeLimit,
                 blackTimeLeft: gameDoc.blackTimeLeft || gameDoc.timeLimit,
-                gameState: ''
+                gameState: '',
+                lastMoveTime: undefined
             };
             gameSessions.set(gameId, session);
         } else {
@@ -457,5 +463,3 @@ export const handleSocketConnection = async (socket: CustomSocket, io: SocketIOS
         }
     });
 }
-
-

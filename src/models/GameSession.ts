@@ -24,6 +24,8 @@ export interface IMove {
     move: string;
     color: 'white' | 'black';
     playerId: string;
+    timestamp: Date;
+    duration: number; // Duration in seconds
 }
 
 const MoveSchema = new Schema<IMove>({
@@ -31,6 +33,8 @@ const MoveSchema = new Schema<IMove>({
     move: { type: String, required: true },
     color: { type: String, required: true, enum: ['white', 'black'] },
     playerId: { type: String, required: true },
+    timestamp: { type: Date, required: true },
+    duration: { type: Number, required: true },
 });
 
 const GameSessionSchema = new Schema<IGameSession>({
