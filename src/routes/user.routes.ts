@@ -11,6 +11,7 @@ import {
   uploadAvatarSchema,
 } from './schemas/userSchema';
 import { authenticate, authorize } from '../middleware/auth';
+import basePath from '../types/pathConfig';
 
 // Define request interfaces to match schemas
 interface IdParams {
@@ -45,7 +46,7 @@ export default async function userRoutes(fastify: FastifyInstance) {
 
   fastify.get('/users/:id', {
     schema: getUserSchema,
-    preHandler: [authenticate, authorize],
+    preHandler: [authenticate],
     handler: async (request: FastifyRequest<IdParams>, reply: FastifyReply) => {
       return userController.getUserById(request, reply);
     },

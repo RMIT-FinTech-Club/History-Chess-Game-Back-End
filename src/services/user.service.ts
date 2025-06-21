@@ -6,6 +6,7 @@ import jwt from 'jsonwebtoken';
 import nodemailer from 'nodemailer';
 import { OAuth2Client } from 'google-auth-library';
 import * as crypto from 'crypto';
+import basePath from '../types/pathConfig';
 
 const prisma = new PrismaClient();
 
@@ -26,18 +27,6 @@ export interface UpdateUserInput {
 export interface UpdateProfileInput {
   username?: string;
   avatarUrl?: string | null | undefined;
-}
-
-interface UserProfileResponse {
-  id: string;
-  username: string;
-  email: string;
-  walletAddress: string | null;
-  avatarUrl: string | null;
-  language: string;
-  elo: number;
-  createdAt: Date;
-  updatedAt: Date;
 }
 
 interface ResetCodeEntry {
@@ -76,13 +65,13 @@ export class UserService {
       },
     });
     if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
-    this.logger.error('Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET in environment variables');
-    throw new Error('Google OAuth configuration is incomplete');
+      this.logger.error('Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET in environment variables');
+      throw new Error('Google OAuth configuration is incomplete');
     }
     this.googleClient = new OAuth2Client(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
-      'http://localhost:8080/users/google-callback'
+      `${basePath}/users/google-callback`
     );
   }
 
@@ -166,7 +155,18 @@ export class UserService {
     return jwt.sign({ id, username, googleAuth } as UserTokenPayload, this.jwtSecret, { expiresIn: '1h', noTimestamp: true });
   }
 
-  async createUser(data: CreateUserInput): Promise<{ token: string; data: UserProfileResponse }> {
+  async createUser(data: CreateUserInput): Promise<{
+    token: string;
+    id: string;
+    username: string;
+    email: string;
+    walletAddress: string | null;
+    avatarUrl: string | null;
+    language: string;
+    elo: number;
+    createdAt: Date;
+    updatedAt: Date;
+  }> {
     try {
       const cleanUsername = this.validateUsername(data.username);
       const cleanEmail = this.validateEmail(data.email);
@@ -203,20 +203,17 @@ export class UserService {
       });
 
       const token = this.generateToken(user.id, user.username, user.googleAuth);
-      const { hashedPassword: _, ...userWithoutPassword } = user;
       return {
         token,
-        data: {
-          id: userWithoutPassword.id,
-          username: userWithoutPassword.username,
-          email: userWithoutPassword.email,
-          walletAddress: userWithoutPassword.walletAddress,
-          avatarUrl: userWithoutPassword.avatarUrl,
-          language: userWithoutPassword.language,
-          elo: userWithoutPassword.elo,
-          createdAt: userWithoutPassword.createdAt,
-          updatedAt: userWithoutPassword.updatedAt,
-        },
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        walletAddress: user.walletAddress,
+        avatarUrl: user.avatarUrl,
+        language: user.language,
+        elo: user.elo,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
       };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -224,7 +221,18 @@ export class UserService {
     }
   }
 
-  async getUserById(id: string): Promise<{ token: string; data: UserProfileResponse } | null> {
+  async getUserById(id: string): Promise<{
+    token: string;
+    id: string;
+    username: string;
+    email: string;
+    walletAddress: string | null;
+    avatarUrl: string | null;
+    language: string;
+    elo: number;
+    createdAt: Date;
+    updatedAt: Date;
+  } | null> {
     try {
       const user = await prisma.users.findUnique({
         where: { id },
@@ -241,20 +249,17 @@ export class UserService {
       if (!user) return null;
 
       const token = this.generateToken(user.id, user.username, user.googleAuth);
-      const { hashedPassword: _, ...userWithoutPassword } = user;
       return {
         token,
-        data: {
-          id: userWithoutPassword.id,
-          username: userWithoutPassword.username,
-          email: userWithoutPassword.email,
-          walletAddress: userWithoutPassword.walletAddress,
-          avatarUrl: userWithoutPassword.avatarUrl,
-          language: userWithoutPassword.language,
-          elo: userWithoutPassword.elo,
-          createdAt: userWithoutPassword.createdAt,
-          updatedAt: userWithoutPassword.updatedAt,
-        },
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        walletAddress: user.walletAddress,
+        avatarUrl: user.avatarUrl,
+        language: user.language,
+        elo: user.elo,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
       };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -262,7 +267,18 @@ export class UserService {
     }
   }
 
-  async getUserByEmail(email: string): Promise<{ token: string; data: UserProfileResponse } | null> {
+  async getUserByEmail(email: string): Promise<{
+    token: string;
+    id: string;
+    username: string;
+    email: string;
+    walletAddress: string | null;
+    avatarUrl: string | null;
+    language: string;
+    elo: number;
+    createdAt: Date;
+    updatedAt: Date;
+  } | null> {
     try {
       const cleanEmail = this.validateEmail(email);
       const user = await prisma.users.findUnique({
@@ -280,20 +296,17 @@ export class UserService {
       if (!user) return null;
 
       const token = this.generateToken(user.id, user.username, user.googleAuth);
-      const { hashedPassword: _, ...userWithoutPassword } = user;
       return {
         token,
-        data: {
-          id: userWithoutPassword.id,
-          username: userWithoutPassword.username,
-          email: userWithoutPassword.email,
-          walletAddress: userWithoutPassword.walletAddress,
-          avatarUrl: userWithoutPassword.avatarUrl,
-          language: userWithoutPassword.language,
-          elo: userWithoutPassword.elo,
-          createdAt: userWithoutPassword.createdAt,
-          updatedAt: userWithoutPassword.updatedAt,
-        },
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        walletAddress: user.walletAddress,
+        avatarUrl: user.avatarUrl,
+        language: user.language,
+        elo: user.elo,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
       };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -302,7 +315,17 @@ export class UserService {
   }
 
   async getAllUsers(limit: number = 10, offset: number = 0): Promise<{
-    users: UserProfileResponse[];
+    users: {
+      id: string;
+      username: string;
+      email: string;
+      walletAddress: string | null;
+      avatarUrl: string | null;
+      language: string;
+      elo: number;
+      createdAt: Date;
+      updatedAt: Date;
+    }[];
     total: number;
     limit: number;
     offset: number;
@@ -319,20 +342,17 @@ export class UserService {
 
       const total = await prisma.users.count();
 
-      const usersWithoutPasswords = users.map((user) => {
-        const { hashedPassword: _, ...userWithoutPassword } = user;
-        return {
-          id: userWithoutPassword.id,
-          username: userWithoutPassword.username,
-          email: userWithoutPassword.email,
-          walletAddress: userWithoutPassword.walletAddress,
-          avatarUrl: userWithoutPassword.avatarUrl,
-          language: userWithoutPassword.language,
-          elo: userWithoutPassword.elo,
-          createdAt: userWithoutPassword.createdAt,
-          updatedAt: userWithoutPassword.updatedAt,
-        };
-      });
+      const usersWithoutPasswords = users.map((user) => ({
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        walletAddress: user.walletAddress,
+        avatarUrl: user.avatarUrl,
+        language: user.language,
+        elo: user.elo,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+      }));
 
       const token = jwt.sign({ action: 'getAllUsers' }, this.jwtSecret, { expiresIn: '1h' });
 
@@ -349,7 +369,18 @@ export class UserService {
     }
   }
 
-  async updateUser(id: string, data: UpdateUserInput): Promise<{ token: string; data: UserProfileResponse } | null> {
+  async updateUser(id: string, data: UpdateUserInput): Promise<{
+    token: string;
+    id: string;
+    username: string;
+    email: string;
+    walletAddress: string | null;
+    avatarUrl: string | null;
+    language: string;
+    elo: number;
+    createdAt: Date;
+    updatedAt: Date;
+  } | null> {
     try {
       const updateData: any = {};
 
@@ -364,27 +395,35 @@ export class UserService {
       });
 
       const token = this.generateToken(updatedUser.id, updatedUser.username, updatedUser.googleAuth);
-      const { hashedPassword: _, ...userWithoutPassword } = updatedUser;
       return {
         token,
-        data: {
-          id: userWithoutPassword.id,
-          username: userWithoutPassword.username,
-          email: userWithoutPassword.email,
-          walletAddress: userWithoutPassword.walletAddress,
-          avatarUrl: userWithoutPassword.avatarUrl,
-          language: userWithoutPassword.language,
-          elo: userWithoutPassword.elo,
-          createdAt: userWithoutPassword.createdAt,
-          updatedAt: userWithoutPassword.updatedAt,
-        },
+        id: updatedUser.id,
+        username: updatedUser.username,
+        email: updatedUser.email,
+        walletAddress: updatedUser.walletAddress,
+        avatarUrl: updatedUser.avatarUrl,
+        language: updatedUser.language,
+        elo: updatedUser.elo,
+        createdAt: updatedUser.createdAt,
+        updatedAt: updatedUser.updatedAt,
       };
     } catch (error: unknown) {
       return null;
     }
   }
 
-  async updateProfile(id: string, data: UpdateProfileInput): Promise<{ token: string; data: UserProfileResponse } | null> {
+  async updateProfile(id: string, data: UpdateProfileInput): Promise<{
+    token: string;
+    id: string;
+    username: string;
+    email: string;
+    walletAddress: string | null;
+    avatarUrl: string | null;
+    language: string;
+    elo: number;
+    createdAt: Date;
+    updatedAt: Date;
+  } | null> {
     try {
       const updateData: any = {};
 
@@ -416,20 +455,17 @@ export class UserService {
       const newToken = this.generateToken(updatedUser.id, updatedUser.username, updatedUser.googleAuth);
       console.log('Generated token in updateProfile:', newToken);
 
-      const { hashedPassword: _, ...userWithoutPassword } = updatedUser;
       return {
         token: newToken,
-        data: {
-          id: userWithoutPassword.id,
-          username: userWithoutPassword.username,
-          email: userWithoutPassword.email,
-          walletAddress: userWithoutPassword.walletAddress,
-          avatarUrl: userWithoutPassword.avatarUrl,
-          language: userWithoutPassword.language,
-          elo: userWithoutPassword.elo,
-          createdAt: userWithoutPassword.createdAt,
-          updatedAt: userWithoutPassword.updatedAt,
-        },
+        id: updatedUser.id,
+        username: updatedUser.username,
+        email: updatedUser.email,
+        walletAddress: updatedUser.walletAddress,
+        avatarUrl: updatedUser.avatarUrl,
+        language: updatedUser.language,
+        elo: updatedUser.elo,
+        createdAt: updatedUser.createdAt,
+        updatedAt: updatedUser.updatedAt,
       };
     } catch (error: unknown) {
       return null;
@@ -447,7 +483,18 @@ export class UserService {
     }
   }
 
-  async login(identifier: string, password?: string, token?: string): Promise<{ token: string; data: UserProfileResponse }> {
+  async login(identifier: string, password?: string, token?: string): Promise<{
+    token: string;
+    id: string;
+    username: string;
+    email: string;
+    walletAddress: string | null;
+    avatarUrl: string | null;
+    language: string;
+    elo: number;
+    createdAt: Date;
+    updatedAt: Date;
+  }> {
     try {
       if (!identifier || typeof identifier !== 'string') {
         this.logger.warn(`Invalid identifier type: ${typeof identifier}`);
@@ -505,17 +552,15 @@ export class UserService {
       const newToken = this.generateToken(user.id, user.username, user.googleAuth);
       return {
         token: newToken,
-        data: {
-          id: user.id,
-          username: user.username,
-          email: user.email,
-          walletAddress: user.walletAddress,
-          avatarUrl: user.avatarUrl,
-          language: user.language,
-          elo: user.elo,
-          createdAt: user.createdAt,
-          updatedAt: user.updatedAt,
-        },
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        walletAddress: user.walletAddress,
+        avatarUrl: user.avatarUrl,
+        language: user.language,
+        elo: user.elo,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
       };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -612,7 +657,18 @@ export class UserService {
     }
   }
 
-  async resetPassword(email: string, resetCode: string, newPassword: string): Promise<{ token: string; data: UserProfileResponse }> {
+  async resetPassword(email: string, resetCode: string, newPassword: string): Promise<{
+    token: string;
+    id: string;
+    username: string;
+    email: string;
+    walletAddress: string | null;
+    avatarUrl: string | null;
+    language: string;
+    elo: number;
+    createdAt: Date;
+    updatedAt: Date;
+  }> {
     try {
       const cleanEmail = this.validateEmail(email);
       const cleanResetCode = this.validateResetCode(resetCode);
@@ -646,17 +702,15 @@ export class UserService {
       const newToken = this.generateToken(user.id, user.username, user.googleAuth);
       return {
         token: newToken,
-        data: {
-          id: user.id,
-          username: user.username,
-          email: user.email,
-          walletAddress: user.walletAddress,
-          avatarUrl: user.avatarUrl,
-          language: user.language,
-          elo: user.elo,
-          createdAt: user.createdAt,
-          updatedAt: user.updatedAt,
-        },
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        walletAddress: user.walletAddress,
+        avatarUrl: user.avatarUrl,
+        language: user.language,
+        elo: user.elo,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
       };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -721,7 +775,18 @@ export class UserService {
     }
   }
 
-  async googleCallback(code: string, state: string): Promise<{ email: string; tempToken: string } | { token: string; data: UserProfileResponse }> {
+  async googleCallback(code: string, state: string): Promise<{ email: string; tempToken: string } | {
+    token: string;
+    id: string;
+    username: string;
+    email: string;
+    walletAddress: string | null;
+    avatarUrl: string | null;
+    language: string;
+    elo: number;
+    createdAt: Date;
+    updatedAt: Date;
+  }> {
     try {
       this.logger.info(`Received Google callback with code: ${code}, state: ${state}`);
       if (!code) {
@@ -754,17 +819,15 @@ export class UserService {
         const token = this.generateToken(existingUser.id, existingUser.username, existingUser.googleAuth);
         return {
           token,
-          data: {
-            id: existingUser.id,
-            username: existingUser.username,
-            email: existingUser.email,
-            walletAddress: existingUser.walletAddress,
-            avatarUrl: existingUser.avatarUrl,
-            language: existingUser.language,
-            elo: existingUser.elo,
-            createdAt: existingUser.createdAt,
-            updatedAt: existingUser.updatedAt,
-          },
+          id: existingUser.id,
+          username: existingUser.username,
+          email: existingUser.email,
+          walletAddress: existingUser.walletAddress,
+          avatarUrl: existingUser.avatarUrl,
+          language: existingUser.language,
+          elo: existingUser.elo,
+          createdAt: existingUser.createdAt,
+          updatedAt: existingUser.updatedAt,
         };
       }
 
@@ -778,7 +841,18 @@ export class UserService {
     }
   }
 
-  async completeGoogleLogin(tempToken: string, username: string): Promise<{ token: string; data: UserProfileResponse }> {
+  async completeGoogleLogin(tempToken: string, username: string): Promise<{
+    token: string;
+    id: string;
+    username: string;
+    email: string;
+    walletAddress: string | null;
+    avatarUrl: string | null;
+    language: string;
+    elo: number;
+    createdAt: Date;
+    updatedAt: Date;
+  }> {
     try {
       const decoded = jwt.verify(tempToken, this.jwtSecret) as TempTokenPayload;
       console.log('Verified tempToken:', decoded);
@@ -815,17 +889,15 @@ export class UserService {
       const token = this.generateToken(user.id, user.username, user.googleAuth);
       return {
         token,
-        data: {
-          id: user.id,
-          username: user.username,
-          email: user.email,
-          walletAddress: user.walletAddress,
-          avatarUrl: user.avatarUrl,
-          language: user.language,
-          elo: user.elo,
-          createdAt: user.createdAt,
-          updatedAt: user.updatedAt,
-        },
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        walletAddress: user.walletAddress,
+        avatarUrl: user.avatarUrl,
+        language: user.language,
+        elo: user.elo,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
       };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
