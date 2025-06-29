@@ -3,8 +3,10 @@
   "version": "1.0.0",
   "main": "server.ts",
   "scripts": {
+    "postinstall": "prisma generate",
     "start": "ts-node src/server.ts",
     "dev": "nodemon --exec ts-node src/server.ts",
+    "build": "tsc --build",
     "prisma:generate": "npx prisma generate --schema=prisma/schema1.prisma",
     "prisma:push": "npx prisma db push --schema=prisma/schema1.prisma",
     "seed": "ts-node prisma/seedNeon.ts"
@@ -62,6 +64,7 @@
     "update": "^0.7.4",
     "uuid": "^11.1.0",
     "validator": "^13.15.0",
+    "vercel": "^43.1.0",
     "ws": "^8.18.1",
     "zod": "^3.25.56"
   },
@@ -74,7 +77,10 @@
     "@types/swagger-jsdoc": "^6.0.4",
     "@types/swagger-ui-express": "^4.1.8",
     "@types/uuid": "^10.0.0",
-    "@types/validator": "^13.12.3",
+    "@types/validator": "^13.15.0",
+    "@typescript-eslint/eslint-plugin": "^8.25.0",
+    "@typescript-eslint/parser": "^8.25.0",
+    "eslint": "^9.21.0",
     "nodemon": "^3.1.9",
     "prisma": "^6.9.0",
     "ts-node": "^10.9.2",

@@ -130,11 +130,11 @@ server.ready(() => {
   server.log.info('All registered routes:');
   server.log.info(server.printRoutes());
 
-  
+
 
   // io.on('connection', (socket: Socket) => {
   //   server.log.info(`Socket connected: ${socket.id}`);
-    
+
   //   // Keep messageFromClient handler commented out but intact
   //   // socket.on('messageFromClient', (data: string) => {
   //   //   server.log.info(`Received message from client ${socket.id}: ${data}`);
@@ -162,7 +162,7 @@ server.ready(() => {
   // });
 
 
-  
+
 });
 
 

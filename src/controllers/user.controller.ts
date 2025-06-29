@@ -6,10 +6,6 @@ interface IdParams {
   id: string;
 }
 
-interface AuthenticatedProfileRequest {
-  Body: UpdateProfileInput;
-}
-
 interface QueryParams {
   limit?: number;
   offset?: number;
@@ -53,7 +49,14 @@ interface VerifyResetCodeRequest {
 
 interface ProfileRequest extends RouteGenericInterface {
   Headers: { authorization?: string };
-  user?: { id: string; username: string; googleAuth: boolean };
+  authUser?: { id: string; username: string; googleAuth: boolean };
+}
+
+interface ProfileUpdateRoute extends RouteGenericInterface {
+  Body: {
+    username?: string;
+    avatarUrl?: string | null;
+  };
 }
 
 interface UpdateProfileRequest {
@@ -73,13 +76,14 @@ export default class UserController {
     reply: FastifyReply
   ): Promise<void> {
     try {
-      const user = await this.userService.createUser(request.body);
-      reply.status(201).send(user);
-    } catch (error: any) {
+      const response = await this.userService.createUser(request.body);
+      reply.status(201).send(response);
+    } catch (error: unknown) {
       request.log.error(error);
-      if (error.message.includes('username')) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      if (message.includes('username')) {
         reply.status(409).send({ message: 'This username is already taken (case-insensitive). Please choose a different username.' });
-      } else if (error.message.includes('email')) {
+      } else if (message.includes('email')) {
         reply.status(409).send({ message: 'This email is already registered. Please use a different email.' });
       } else {
         reply.status(500).send({ message: 'Internal server error' });
@@ -92,12 +96,12 @@ export default class UserController {
     reply: FastifyReply
   ): Promise<void> {
     const { id } = request.params;
-    const user = await this.userService.getUserById(id);
+    const response = await this.userService.getUserById(id);
 
-    if (!user) {
+    if (!response) {
       reply.status(404).send({ message: 'User not found' });
     } else {
-      reply.status(200).send(user);
+      reply.status(200).send(response);
     }
   }
 
@@ -108,8 +112,8 @@ export default class UserController {
     const limit = request.query.limit || 10;
     const offset = request.query.offset || 0;
 
-    const result = await this.userService.getAllUsers(limit, offset);
-    reply.status(200).send(result);
+    const response = await this.userService.getAllUsers(limit, offset);
+    reply.status(200).send(response);
   }
 
   async getProfile(
@@ -117,22 +121,22 @@ export default class UserController {
     reply: FastifyReply
   ): Promise<void> {
     try {
-      const userId = (request as any).user?.id;
+      const userId = request.authUser?.id;
 
       if (!userId) {
         reply.status(401).send({ message: 'Authentication required' });
         return;
       }
 
-      const user = await this.userService.getUserById(userId);
+      const response = await this.userService.getUserById(userId);
 
-      if (!user) {
+      if (!response) {
         reply.status(404).send({ message: 'User not found' });
         return;
       }
 
-      reply.status(200).send({ user });
-    } catch (error) {
+      reply.status(200).send(response);
+    } catch (error: unknown) {
       request.log.error(error);
       reply.status(500).send({ message: 'Internal server error' });
     }
@@ -145,19 +149,20 @@ export default class UserController {
     const { id } = request.params;
 
     try {
-      const updatedUser = await this.userService.updateUser(id, request.body);
+      const response = await this.userService.updateUser(id, request.body);
 
-      if (!updatedUser) {
+      if (!response) {
         reply.status(404).send({ message: 'User not found' });
         return;
       }
 
-      reply.status(200).send(updatedUser);
-    } catch (error: any) {
+      reply.status(200).send(response);
+    } catch (error: unknown) {
       request.log.error(error);
-      if (error.message.includes('username')) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      if (message.includes('username')) {
         reply.status(409).send({ message: 'This username is already taken (case-insensitive). Please choose a different username.' });
-      } else if (error.message.includes('email')) {
+      } else if (message.includes('email')) {
         reply.status(409).send({ message: 'This email is already registered. Please use a different email.' });
       } else {
         reply.status(500).send({ message: 'Internal server error' });
@@ -173,20 +178,77 @@ export default class UserController {
     const { username, avatarUrl } = request.body;
 
     try {
-      const updatedUser = await this.userService.updateProfile(id, { username, avatarUrl });
+      const response = await this.userService.updateProfile(id, { username, avatarUrl });
 
-      if (!updatedUser) {
+      if (!response) {
         reply.status(404).send({ message: 'User not found' });
         return;
       }
 
-      reply.status(200).send(updatedUser);
-    } catch (error: any) {
+      reply.status(200).send(response);
+    } catch (error: unknown) {
       request.log.error(error);
-      if (error.message.includes('Username already taken')) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      if (message.includes('Username already taken')) {
         reply.status(409).send({ message: 'This username already exists, please choose another username.' });
       } else {
         reply.status(500).send({ message: 'Internal server error' });
+      }
+    }
+  }
+
+  async updateAuthenticatedProfile(
+    request: FastifyRequest<ProfileUpdateRoute>,
+    reply: FastifyReply
+  ): Promise<void> {
+    try {
+      const userId = request.authUser?.id;
+      console.log('Extracted userId:', userId);
+
+      if (!userId) {
+        console.log('No userId found, returning 401');
+        reply.status(401).send({ message: 'Authentication required' });
+        return;
+      }
+
+      const { username, avatarUrl } = request.body;
+      console.log('Extracted from body - username:', username, 'avatarUrl:', avatarUrl);
+
+      if (username === undefined && avatarUrl === undefined) {
+        console.log('No valid fields provided in request');
+        reply.status(400).send({ message: 'At least one field (username or avatarUrl) must be provided' });
+        return;
+      }
+
+      const updateData: UpdateProfileInput = {};
+      if (username !== undefined) updateData.username = username;
+      if (avatarUrl !== undefined) updateData.avatarUrl = avatarUrl;
+      console.log('Update data to send to service:', updateData);
+
+      console.log('Calling userService.updateProfile...');
+      const response = await this.userService.updateProfile(userId, updateData);
+      console.log('Service response:', response);
+
+      if (!response) {
+        console.log('No updated user returned, sending 404');
+        reply.status(404).send({ message: 'User not found' });
+        return;
+      }
+
+      console.log('Sending success response');
+      reply.status(200).send(response);
+    } catch (error: unknown) {
+      console.log('=== ERROR IN UPDATE PROFILE ===');
+      console.log('Error:', error);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.log('Error message:', message);
+      console.log('Error stack:', error instanceof Error ? error.stack : undefined);
+      request.log.error(error);
+
+      if (message.includes('Username already taken')) {
+        reply.status(409).send({ message: 'This username already exists, please choose another username.' });
+      } else {
+        reply.status(500).send({ message: 'Internal server error', error: message });
       }
     }
   }
@@ -195,13 +257,18 @@ export default class UserController {
     request: FastifyRequest<{ Params: IdParams }>,
     reply: FastifyReply
   ): Promise<void> {
-    const { id } = request.params;
-    const deleted = await this.userService.deleteUser(id);
+    try {
+      const { id } = request.params;
+      const deleted = await this.userService.deleteUser(id);
 
-    if (!deleted) {
-      reply.status(404).send({ message: 'User not found' });
-    } else {
-      reply.status(200).send({ message: 'User deleted successfully' });
+      if (!deleted) {
+        reply.status(404).send({ message: 'User not found' });
+      } else {
+        reply.status(200).send({ message: 'User deleted successfully' });
+      }
+    } catch (error: unknown) {
+      request.log.error(error);
+      reply.status(500).send({ message: 'Internal server error' });
     }
   }
 
@@ -211,10 +278,11 @@ export default class UserController {
   ): Promise<void> {
     try {
       const { identifier, password } = request.body;
-      const { token, data } = await this.userService.login(identifier, password);
-      reply.status(200).send({ token, user: data });
-    } catch (error: any) {
-      reply.status(401).send({ message: error.message });
+      const response = await this.userService.login(identifier, password);
+      reply.status(200).send(response);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      reply.status(401).send({ message });
     }
   }
 
@@ -226,8 +294,9 @@ export default class UserController {
       const { email } = request.body;
       await this.userService.requestPasswordReset(email);
       reply.status(200).send({ message: "Verification code sent successfully" });
-    } catch (error: any) {
-      reply.status(400).send({ message: error.message });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      reply.status(400).send({ message });
     }
   }
 
@@ -237,15 +306,11 @@ export default class UserController {
   ): Promise<void> {
     try {
       const { email, resetCode, newPassword } = request.body;
-      const { token } = await this.userService.resetPassword(email, resetCode, newPassword);
-      const user = await this.userService.getUserByEmail(email);
-      if (!user) {
-        reply.status(404).send({ message: 'User not found' });
-        return;
-      }
-      reply.status(200).send({ token, user });
-    } catch (error: any) {
-      reply.status(400).send({ message: error.message });
+      const response = await this.userService.resetPassword(email, resetCode, newPassword);
+      reply.status(200).send(response);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      reply.status(400).send({ message });
     }
   }
 
@@ -255,11 +320,12 @@ export default class UserController {
   ): Promise<void> {
     try {
       const { oldPassword, newPassword } = request.body;
-      const { id } = (request as any).user!;
+      const { id } = request.authUser!;
       await this.userService.updatePassword(id, oldPassword, newPassword);
       reply.status(200).send({ message: "Password updated successfully" });
-    } catch (error: any) {
-      reply.status(400).send({ message: error.message });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      reply.status(400).send({ message });
     }
   }
 
@@ -270,7 +336,7 @@ export default class UserController {
     try {
       const { code, state } = request.query;
       const result = await this.userService.googleCallback(code, state);
-      if ('email' in result) {
+      if ('tempToken' in result) {
         reply.type('text/html').send(`
           <script>
             window.opener.postMessage({
@@ -287,21 +353,22 @@ export default class UserController {
             window.opener.postMessage({
               type: 'google-auth',
               token: '${result.token}',
-              userId: '${result.data.id}',
-              username: '${result.data.username}',
-              email: '${result.data.email}',
-              avatarUrl: '${result.data.avatarUrl || ''}'
+              userId: '${result.id}',
+              username: '${result.username}',
+              email: '${result.email}',
+              avatarUrl: '${result.avatarUrl || ''}'
             }, 'http://localhost:3000');
             window.close();
           </script>
         `);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
       reply.type('text/html').send(`
         <script>
           window.opener.postMessage({
             type: 'google-auth-error',
-            error: '${error.message}'
+            error: '${message}'
           }, 'http://localhost:3000');
           window.close();
         </script>
@@ -315,10 +382,11 @@ export default class UserController {
   ): Promise<void> {
     try {
       const { tempToken, username } = request.body;
-      const { token, data } = await this.userService.completeGoogleLogin(tempToken, username);
-      reply.status(200).send({ token, user: data });
-    } catch (error: any) {
-      reply.status(400).send({ message: error.message });
+      const response = await this.userService.completeGoogleLogin(tempToken, username);
+      reply.status(200).send(response);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      reply.status(400).send({ message });
     }
   }
 
@@ -330,8 +398,9 @@ export default class UserController {
       const { email } = request.body;
       const result = await this.userService.checkAuthType(email);
       reply.status(200).send(result);
-    } catch (error: any) {
-      reply.status(400).send({ message: error.message });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      reply.status(400).send({ message });
     }
   }
 
@@ -343,8 +412,9 @@ export default class UserController {
       const { email, resetCode } = request.body;
       await this.userService.verifyResetCode(email, resetCode);
       reply.status(200).send({ message: "Verification code is valid" });
-    } catch (error: any) {
-      reply.status(400).send({ message: error.message });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      reply.status(400).send({ message });
     }
   }
 
@@ -356,76 +426,9 @@ export default class UserController {
       const { state } = request.query;
       const authUrl = await this.userService.googleAuth(state);
       reply.redirect(authUrl);
-    } catch (error: any) {
-      reply.status(500).send({ message: error.message });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      reply.status(500).send({ message });
     }
   }
-
-  async updateAuthenticatedProfile(
-  request: FastifyRequest,
-  reply: FastifyReply
-  ): Promise<void> {
-    try {
-      const userId = (request as any).user?.id;
-      console.log('Extracted userId:', userId);
-
-      if (!userId) {
-        console.log('No userId found, returning 401');
-        reply.status(401).send({ message: 'Authentication required' });
-        return;
-      }
-
-      // Handle the case where request.body might be undefined or not an object
-      const body = request.body as any;
-      
-      if (!body || typeof body !== 'object') {
-        console.log('Invalid or missing request body:', body);
-        reply.status(400).send({ message: 'Invalid request body' });
-        return;
-      }
-
-      const { username, avatarUrl } = body;
-      console.log('Extracted from body - username:', username, 'avatarUrl:', avatarUrl);
-
-      // Check if at least one field is provided
-      if (username === undefined && avatarUrl === undefined) {
-        console.log('No valid fields provided in request');
-        reply.status(400).send({ message: 'At least one field (username or avatarUrl) must be provided' });
-        return;
-      }
-
-      // Create update object with only defined values
-      const updateData: any = {};
-      if (username !== undefined) updateData.username = username;
-      if (avatarUrl !== undefined) updateData.avatarUrl = avatarUrl;
-      
-      console.log('Update data to send to service:', updateData);
-
-      // Call the service to update the profile
-      console.log('Calling userService.updateProfile...');
-      const updatedUser = await this.userService.updateProfile(userId, updateData);
-      console.log('Service response:', updatedUser);
-
-      if (!updatedUser) {
-        console.log('No updated user returned, sending 404');
-        reply.status(404).send({ message: 'User not found' });
-        return;
-      }
-
-      console.log('Sending success response');
-      reply.status(200).send(updatedUser);
-    } catch (error: any) {
-      console.log('=== ERROR IN UPDATE PROFILE ===');
-      console.log('Error:', error);
-      console.log('Error message:', error.message);
-      console.log('Error stack:', error.stack);
-      request.log.error(error);
-      
-      if (error.message.includes('Username already taken')) {
-        reply.status(409).send({ message: 'This username already exists, please choose another username.' });
-      } else {
-        reply.status(500).send({ message: 'Internal server error', error: error.message });
-      }
-    }
-    }
 }

@@ -14,13 +14,28 @@ export const userProperties = {
 
 export const userResponseSchema = {
   type: 'object',
-  properties: userProperties,
+  properties: {
+    token: { type: 'string' },
+    id: { type: 'string', format: 'uuid' },
+    username: { type: 'string' },
+    email: { type: 'string', format: 'email' },
+    walletAddress: { type: 'string', nullable: true },
+    avatarUrl: { type: 'string', nullable: true },
+    language: { type: 'string', enum: ['en', 'vi'] },
+    elo: { type: 'integer' },
+    createdAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time' },
+  },
   additionalProperties: false,
 };
 
 export const userArrayResponseSchema = {
   type: 'array',
-  items: userResponseSchema,
+  items: {
+    type: 'object',
+    properties: userProperties,
+    additionalProperties: false,
+  },
 };
 
 export const createUserSchema = {
@@ -144,13 +159,7 @@ export const updateAuthenticatedProfileSchema = {
     additionalProperties: false,
   },
   response: {
-    200: {
-      type: 'object',
-      properties: {
-        token: { type: 'string' },
-        ...userProperties,
-      },
-    },
+    200: userResponseSchema,
     401: {
       type: 'object',
       properties: {
@@ -221,6 +230,7 @@ export const getAllUsersSchema = {
         total: { type: 'integer' },
         limit: { type: 'integer' },
         offset: { type: 'integer' },
+        token: { type: 'string' },
       },
     },
   },
@@ -243,8 +253,16 @@ export const uploadAvatarSchema = {
       type: 'object',
       properties: {
         message: { type: 'string' },
-        avatarUrl: { type: 'string' },
-        user: userResponseSchema,
+        token: { type: 'string' },
+        id: { type: 'string', format: 'uuid' },
+        username: { type: 'string' },
+        email: { type: 'string', format: 'email' },
+        walletAddress: { type: 'string', nullable: true },
+        avatarUrl: { type: 'string', nullable: true },
+        language: { type: 'string', enum: ['en', 'vi'] },
+        elo: { type: 'integer' },
+        createdAt: { type: 'string', format: 'date-time' },
+        updatedAt: { type: 'string', format: 'date-time' },
       },
     },
     400: {

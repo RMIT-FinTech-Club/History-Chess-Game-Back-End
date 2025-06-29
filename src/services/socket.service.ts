@@ -1,20 +1,24 @@
 import { Server as SocketIOServer, Socket } from "socket.io"
-import { Chess } from "chess.js"
+import { Chess } from "chess.js";
 import fastify, { FastifyInstance } from "fastify"
 import { GameSession, IGameSession } from "../models/GameSession"
 import { GameStatus, PlayMode } from '../types/enum'
 import { InMemoryGameSession } from '../types/game.types';
 import { CustomSocket } from '../types/socket.types';
 import * as GameService from "./game.service"
+import { saveGameResult, saveMove, updateElo } from "./game.service"
+import { StockfishService } from "./stockfish.service";
 
-const gameSessions = new Map<string, InMemoryGameSession>();
+
+export const gameSessions = new Map<string, InMemoryGameSession>();
 const onlineUsers = new Map<string, { userId: string; socketId: string; lastSeen: Date }>();
+
 
 const startTimer = (session: InMemoryGameSession, io: SocketIOServer, fastify: FastifyInstance): void => {
     if (session.timer) clearInterval(session.timer);
     console.log("Starting timer for gameId:", session.gameId);
     console.log("Timer interval:", session.whiteTimeLeft);
-        
+
     session.timer = setInterval(() => {
         const isWhiteTurn: boolean = session.chess.turn() === "w";
         if (isWhiteTurn) {
@@ -39,16 +43,17 @@ const startTimer = (session: InMemoryGameSession, io: SocketIOServer, fastify: F
 const endGame = async (fastify: FastifyInstance, session: InMemoryGameSession, io: SocketIOServer, result: string) => {
     if (session.timer) clearInterval(session.timer);
 
+
     const winnerId = result.includes('White') ? session.players[0] : result.includes('Black') ? session.players[1] : null;
     const eloUpdate = await GameService.updateElo(fastify.prisma, session.gameId, winnerId);
-    
+
     // Save the game result to the database
     await GameService.saveGameResult(session.gameId, result);
-    
+
     // Log the winner for debugging
     console.log(`Game ${session.gameId} ended. Result: ${result}. Winner: ${winnerId || 'Draw'}`);
 
-    session.status = GameStatus.finished
+    session.status = GameStatus.finished;
 
     io.to(session.gameId).emit('gameOver', {
         ...getGameState(session),
@@ -56,6 +61,9 @@ const endGame = async (fastify: FastifyInstance, session: InMemoryGameSession, i
         result,
         eloUpdate
     })
+
+    await GameService.calculateGameAccuracy(session.gameId);
+
     gameSessions.delete(session.gameId)
 }
 
@@ -68,113 +76,157 @@ const getGameState = (session: InMemoryGameSession) => {
         inCheck: session.chess.inCheck(),
         gameOver: session.chess.isGameOver(),
         whiteTimeLeft: session.whiteTimeLeft,
-        blackTimeLeft: session.blackTimeLeft
+        blackTimeLeft: session.blackTimeLeft,
+        analyzing: false
     };
 }
 
+// const getGameState = (session: GameSessionInterface) => {
+//     return {yy,
+//         fen: session.chess.fen(),
+//         players: session.players,
+//         status: session.status,
+//         turn: session.chess.turn(),
+//         inCheck: session.chess.inCheck(),
+//         gameOver: session.chess.isGameOver(),
+//         whiteTimeLeft: session.whiteTimeLeft,
+//         blackTimeLeft: session.blackTimeLeft,
+//         analyzing: false 
+//     };
+// }
 
 export const handleMove = async (socket: Socket, io: SocketIOServer, fastify: FastifyInstance, gameId: string, move: string, userId: string) => {
-    console.log("Handling move for gameId:", gameId);
-    console.log("Current game sessions:", Array.from(gameSessions.keys()));
+    //console.log("Handling move for gameId:", gameId);
+    //console.log("Current game sessions:", Array.from(gameSessions.keys()));
 
     const session = gameSessions.get(gameId);
-    // console.log("Session: ", session);
+    // onsole.log("Session: ", session);
     if (!session) {
-      console.log("Game session not found for gameId:", gameId);
-      socket.emit('error', { message: 'Game session not found' });
-      return;
+        console.log("Game session not found for gameId:", gameId);
+        socket.emit('error', { message: 'Game session not found' });
+        return;
     }
 
     // Use the userId passed directly from the client
     const currentPlayerId = userId;
     if (!currentPlayerId) {
-      socket.emit('error', { message: 'Player not identified' });
-      return;
+        socket.emit('error', { message: 'Player not identified' });
+        return;
     }
 
     // Check if it's this player's turn
     const isWhiteTurn = session.chess.turn() === 'w';
-    const whitePlayerId = session.players[0]; // First player is white
-    const blackPlayerId = session.players[1]; // Second player is black
-    
-    if ((isWhiteTurn && currentPlayerId !== whitePlayerId) || 
+    const whitePlayerId = session.players[0];
+    const blackPlayerId = session.players[1];
+
+    if ((isWhiteTurn && currentPlayerId !== whitePlayerId) ||
         (!isWhiteTurn && currentPlayerId !== blackPlayerId)) {
-      socket.emit('error', { message: 'Not your turn' });
-      return;
+        socket.emit('error', { message: 'Not your turn' });
+        return;
     }
 
     try {
         // Calculate move duration
         const now = Date.now();
         const moveDuration = session.lastMoveTime ? now - session.lastMoveTime : 0;
-        
+
         // Make the move in memory
         session.chess.move(move);
-    
+
         // Save the move to the database with player color and ID
         const moveNumber = session.chess.history().length;
         const color = isWhiteTurn ? 'white' : 'black';
-        await GameService.saveMove(gameId, move, moveNumber, color, currentPlayerId, moveDuration);
+        const fen = session.chess.fen();
+
+        // Save move with analysis (replaces saveMove)
+        const analysisPromise = saveMove(gameId, move, moveNumber, color, currentPlayerId, moveDuration, fen);
+        if (!analysisPromise) {
+            console.error('Failed to save move analysis');
+            socket.emit('error', { message: 'Failed to save move analysis' });
+            return;
+        }
         session.lastMoveTime = now;
-    
+
         // Broadcast the move to all players
         io.to(gameId).emit('gameState', {
             ...getGameState(session),
             moveNumber,
             move,
             color,
-            playerId: currentPlayerId
-        });   
+            playerId: currentPlayerId,
+            analyzing: true
+        });
 
-      // If the game is already finished, send the final state
-      if (session && session.status === GameStatus.finished) {
-          const gameState = getGameState(session);
-          let result = '';
-          if (session.chess.isCheckmate()) {
-              result = `Checkmate! ${session.chess.turn() === 'w' ? 'Black' : 'White'} wins!`;
-          } else if (session.chess.isDraw()) {
-              result = 'Draw!';
-          } else if (session.chess.isStalemate()) {
-              result = 'Draw by stalemate!';
-          } else if (session.chess.isThreefoldRepetition()) {
-              result = 'Draw by threefold repetition!';
-          } else if (session.chess.isInsufficientMaterial()) {
-              result = 'Draw by insufficient material!';
-          }
-          io.to(gameId).emit('gameOver', { 
-              message: 'Game over', 
-              gameState,
-              result
-          });
-      }
+        // Handle analysis result asynchronously
+        analysisPromise.then(analysis => {
+            if (analysis) {
+                io.to(gameId).emit('moveAnalysis', {
+                    moveNumber,
+                    evaluation: analysis.evaluation,
+                    bestmove: analysis.bestmove,
+                    mate: analysis.mate,
+                    continuation: analysis.continuation,
+                    analyzing: false
+                });
+            }
+        }).catch(error => {
+            console.error('Move analysis failed:', error);
+            io.to(gameId).emit('moveAnalysis', {
+                moveNumber,
+                analyzing: false,
+                error: 'Analysis failed'
+            });
+        });
 
-      // Check if the game is over
-      if (session && session.chess.isGameOver()) {
-          let result = '';
-          
-          if (session.chess.isCheckmate()) {
-              result = session.chess.turn() === 'w' ? 'Black wins by checkmate' : 'White wins by checkmate';
-          } else if (session.chess.isDraw()) {
-              if (session.chess.isStalemate()) {
-                  result = 'Draw by stalemate';
-              } else if (session.chess.isThreefoldRepetition()) {
-                  result = 'Draw by repetition';
-              } else if (session.chess.isInsufficientMaterial()) {
-                  result = 'Draw by insufficient material';
-              } else {
-                  result = 'Draw';
-              }
-          }
-          
-          await endGame(fastify, session, io, result);
-      } else {
-          // Game continues
-          if (session) startTimer(session, io, fastify);
-      }
+        // If the game is already finished, send the final state
+        if (session && session.status === GameStatus.finished) {
+            const gameState = getGameState(session);
+            let result = '';
+            if (session.chess.isCheckmate()) {
+                result = `Checkmate! ${session.chess.turn() === 'w' ? 'Black' : 'White'} wins!`;
+            } else if (session.chess.isDraw()) {
+                result = 'Draw!';
+            } else if (session.chess.isStalemate()) {
+                result = 'Draw by stalemate!';
+            } else if (session.chess.isThreefoldRepetition()) {
+                result = 'Draw by threefold repetition!';
+            } else if (session.chess.isInsufficientMaterial()) {
+                result = 'Draw by insufficient material!';
+            }
+            io.to(gameId).emit('gameOver', {
+                message: 'Game over',
+                gameState,
+                result
+            });
+        }
+
+        // Check if the game is over
+        if (session && session.chess.isGameOver()) {
+            let result = '';
+
+            if (session.chess.isCheckmate()) {
+                result = session.chess.turn() === 'w' ? 'Black wins by checkmate' : 'White wins by checkmate';
+            } else if (session.chess.isDraw()) {
+                if (session.chess.isStalemate()) {
+                    result = 'Draw by stalemate';
+                } else if (session.chess.isThreefoldRepetition()) {
+                    result = 'Draw by repetition';
+                } else if (session.chess.isInsufficientMaterial()) {
+                    result = 'Draw by insufficient material';
+                } else {
+                    result = 'Draw';
+                }
+            }
+
+            await endGame(fastify, session, io, result);
+        } else {
+            // Game continues
+            if (session) startTimer(session, io, fastify);
+        }
     }
     catch (error) {
-      console.error("Error handling move:", error);
-      socket.emit('error', { message: 'Invalid move' });
+        console.error("Error handling move:", error);
+        socket.emit('error', { message: 'Invalid move' });
     }
 }
 
@@ -185,24 +237,24 @@ export const handleSocketConnection = async (socket: CustomSocket, io: SocketIOS
     // Track user connection
     socket.on('identify', (userId: string) => {
         if (!userId) return;
-        
+
         // Set the userId in socket data
         socket.data.userId = userId;
-        
+
         // Remove user from any previous connections
         for (const [id, user] of onlineUsers.entries()) {
             if (user.userId === userId) {
                 onlineUsers.delete(id);
             }
         }
-        
+
         // Add new connection
         onlineUsers.set(socket.id, {
             userId,
             socketId: socket.id,
             lastSeen: new Date()
         });
-        
+
         // Notify all clients about the updated online users
         io.emit('onlineUsers', Array.from(onlineUsers.values()).map(u => u.userId));
     });
@@ -261,7 +313,7 @@ export const handleSocketConnection = async (socket: CustomSocket, io: SocketIOS
             if (result) {
                 // Match found, notify both players
                 const { gameId, matchedPlayer } = result;
-                
+
                 // Notify the matched player
                 io.to(matchedPlayer.socketId).emit('matchFound', {
                     gameId,
@@ -297,7 +349,7 @@ export const handleSocketConnection = async (socket: CustomSocket, io: SocketIOS
     socket.on('joinGame', async ({ gameId, userId }) => {
         let session: InMemoryGameSession | null = gameSessions.get(gameId) as InMemoryGameSession;
         console.log("Joining game with ID:", gameId);
-        
+
         // Get the game session from database
         const gameDoc = await GameSession.findOne({ gameId });
 
@@ -314,11 +366,11 @@ export const handleSocketConnection = async (socket: CustomSocket, io: SocketIOS
         // If the game not in the system current session then create new game session
         if (!session) {
             console.log("Creating new game session for:", gameId);
-            
+
             // Get move history from database to restore game state
             const moves = await GameService.getGameMoves(gameId);
             const chess = new Chess();
-            
+
             // Replay moves to get current position
             if (moves && moves.length > 0) {
                 try {
@@ -327,7 +379,7 @@ export const handleSocketConnection = async (socket: CustomSocket, io: SocketIOS
                     console.error("Error replaying moves:", error);
                 }
             }
-            
+
             session = {
                 gameId,
                 players: [gameDoc.whitePlayerId, gameDoc.blackPlayerId], // Set players in correct order
@@ -349,7 +401,7 @@ export const handleSocketConnection = async (socket: CustomSocket, io: SocketIOS
 
         // Join the game room
         socket.join(gameId);
-        
+
         // Send current game state to the joining player
         if (session) {
             const gameState = {
@@ -373,7 +425,7 @@ export const handleSocketConnection = async (socket: CustomSocket, io: SocketIOS
             if (bothPlayersConnected && !isRejoin) {
                 // This is a truly new game start
                 startTimer(session, io, fastify);
-                
+
                 // Notify both players that the game is starting
                 io.to(gameId).emit('gameStart', {
                     gameId: gameId,
@@ -425,7 +477,7 @@ export const handleSocketConnection = async (socket: CustomSocket, io: SocketIOS
 
     socket.on('disconnect', () => {
         fastify.log.info(`Client disconnected: ${socket.id}`);
-        
+
         // Remove user from online users
         if (onlineUsers.has(socket.id)) {
             const { userId } = onlineUsers.get(socket.id)!;
@@ -433,7 +485,7 @@ export const handleSocketConnection = async (socket: CustomSocket, io: SocketIOS
             // Notify all clients about the updated online users
             io.emit('onlineUsers', Array.from(onlineUsers.values()).map(u => u.userId));
         }
-        
+
         const gameId = socket.data?.gameId;
         const userId = socket.data?.userId;
 
@@ -454,7 +506,7 @@ export const handleSocketConnection = async (socket: CustomSocket, io: SocketIOS
             }, 30000);
         }
     })
-    
+
     socket.on('leaveGame', async ({ gameId, userId }) => {
         const session = gameSessions.get(gameId);
         if (session && session.players.includes(userId)) {

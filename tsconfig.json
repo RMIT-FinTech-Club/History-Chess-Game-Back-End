@@ -6,11 +6,18 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "outDir": "./dist",
-    "rootDir": "./",
+    "rootDir": "./src",
     "sourceMap": true,
     "noImplicitAny": true,
     "moduleResolution": "node"
   },
-  "include": ["src/**/*", "server.ts", "prisma/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "include": [
+    "src/**/*",
+    "server.ts",
+    "src/prisma/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
 }

@@ -14,8 +14,9 @@ const websocketPlugin: FastifyPluginAsync = fp(async (fastify: FastifyInstance) 
 
     const io: SocketIOServer = new SocketIOServer(fastify.server, {
         cors: {
-            origin: ["http://localhost:3000", "http://127.0.0.1:3000"],
+            origin: ["http://localhost:3000", "https://history-chess-game-front-end.onrender.com"],
             methods: ["GET", "POST", "PUT", "DELETE"],
+            allowedHeaders: ['Content-Type', 'Authorization'],
             credentials: true
         },
         path: "/socket.io/",

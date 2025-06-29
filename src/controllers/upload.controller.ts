@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 export interface AvatarRequest {
   Params: { id: string };
   Headers: { authorization?: string };
-  user?: { id: string; username: string; googleAuth: boolean };
+  authUser?: { id: string; username: string; googleAuth: boolean };
 }
 
 export const uploadController = {
@@ -16,8 +16,8 @@ export const uploadController = {
     fastify: FastifyInstance
   ): Promise<void> {
     try {
-      const userId = (request.user as { id: string; username: string; googleAuth: boolean })?.id;
-      request.log.info(`Avatar upload attempt: userId=${userId}, params.id=${request.params.id}, user=${JSON.stringify(request.user)}, authHeader=${request.headers.authorization}`);
+      const userId = request.authUser?.id;
+      request.log.info(`Avatar upload attempt: userId=${userId}, params.id=${request.params.id}, user=${JSON.stringify(request.authUser)}, authHeader=${request.headers.authorization}`);
       if (!userId || userId !== request.params.id) {
         request.log.warn(`Unauthorized avatar upload: userId=${userId}, params.id=${request.params.id}`);
         reply.status(401).send({ message: 'Unauthorized' });
@@ -50,14 +50,14 @@ export const uploadController = {
       });
 
       const userService = new UserService(fastify);
-      const user = await userService.getUserById(userId);
-      if (!user) {
+      const userResponse = await userService.getUserById(userId);
+      if (!userResponse) {
         reply.status(404).send({ message: 'User not found' });
         return;
       }
 
-      if (user.avatarUrl) {
-        const oldKey = user.avatarUrl.split('/').pop();
+      if (userResponse.avatarUrl) {
+        const oldKey = userResponse.avatarUrl.split('/').pop();
         if (oldKey) {
           await s3Client.send(new DeleteObjectCommand({
             Bucket: process.env.AWS_S3_BUCKET_NAME || 'fintech-club-vietnamese-historical-chess-game',
@@ -82,18 +82,21 @@ export const uploadController = {
       const avatarUrl = `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/avatars/${fileName}`;
       request.log.info(`Generated avatar URL: ${avatarUrl}`);
 
-      const updatedUser = await userService.updateProfile(userId, { avatarUrl });
-
-      if (!updatedUser) {
+      const updatedUserResponse = await userService.updateProfile(userId, { avatarUrl });
+      if (!updatedUserResponse) {
         reply.status(404).send({ message: 'User not found' });
         return;
       }
 
-      reply.status(200).send({ avatarUrl, user: updatedUser });
-    } catch (error: any) {
-      request.log.error(`S3 upload error: ${error.message}, code=${error.code}, requestId=${error.requestId}`);
+      reply.status(200).send({
+        message: 'Avatar uploaded successfully',
+        ...updatedUserResponse,
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      request.log.error(`S3 upload error: ${message}, code=${error instanceof Error && 'code' in error ? error.code : undefined}, requestId=${error instanceof Error && 'requestId' in error ? error.requestId : undefined}`);
       reply.status(500).send({ 
-        message: `S3 upload failed: ${error.message || 'Unknown error'}` 
+        message: `S3 upload failed: ${message}` 
       });
     }
   },
@@ -104,8 +107,8 @@ export const uploadController = {
     fastify: FastifyInstance
   ): Promise<void> {
     try {
-      const userId = (request.user as { id: string; username: string; googleAuth: boolean })?.id;
-      request.log.info(`Avatar delete attempt: userId=${userId}, params.id=${request.params.id}, user=${JSON.stringify(request.user)}, authHeader=${request.headers.authorization}`);
+      const userId = request.authUser?.id;
+      request.log.info(`Avatar delete attempt: userId=${userId}, params.id=${request.params.id}, user=${JSON.stringify(request.authUser)}, authHeader=${request.headers.authorization}`);
       if (!userId || userId !== request.params.id) {
         request.log.warn(`Unauthorized avatar delete: userId=${userId}, params.id=${request.params.id}`);
         reply.status(401).send({ message: 'Unauthorized' });
@@ -113,14 +116,14 @@ export const uploadController = {
       }
 
       const userService = new UserService(fastify);
-      const user = await userService.getUserById(userId);
-      if (!user) {
+      const userResponse = await userService.getUserById(userId);
+      if (!userResponse) {
         reply.status(404).send({ message: 'User not found' });
         return;
       }
 
-      if (user.avatarUrl) {
-        const oldKey = user.avatarUrl.split('/').pop();
+      if (userResponse.avatarUrl) {
+        const oldKey = userResponse.avatarUrl.split('/').pop();
         if (oldKey) {
           const s3Client = new S3Client({
             region: process.env.AWS_REGION || 'ap-southeast-2',
@@ -138,16 +141,16 @@ export const uploadController = {
         }
       }
 
-      const updatedUser = await userService.updateProfile(userId, { avatarUrl: null });
-
-      if (!updatedUser) {
+      const updatedUserResponse = await userService.updateProfile(userId, { avatarUrl: null });
+      if (!updatedUserResponse) {
         reply.status(404).send({ message: 'User not found' });
         return;
       }
 
-      reply.status(200).send({ message: 'Avatar deleted successfully', user: updatedUser });
-    } catch (error: any) {
-      request.log.error(`Delete avatar error: ${error.message}`);
+      reply.status(200).send({ message: 'Avatar deleted successfully', ...updatedUserResponse });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      request.log.error(`Delete avatar error: ${message}`);
       reply.status(500).send({ message: 'Internal server error' });
     }
   },
