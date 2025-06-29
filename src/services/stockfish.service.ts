@@ -198,6 +198,8 @@ export class StockfishService {
             mate: null,    // Mate in X
             continuation: '',
             error: undefined, // Explicitly undefined if no error
+            timestamp: new Date(),
+            duration: 5,
         };
 
         // Create initial board for player color and best move processing later
@@ -371,7 +373,7 @@ export class StockfishService {
 
         // Calculate the average expected points lost per valid move
         const averageExpectedPointsLost = totalExpectedPointsLost / validMovesCount;
-        
+
         // No need to throw error here, `validMovesCount` handles division by zero.
         // `averageExpectedPointsLost` will be finite as long as `validMovesCount` > 0.
 
@@ -379,7 +381,7 @@ export class StockfishService {
         // Scale the average loss to an accuracy percentage
         // The formula aims for 100% when avg loss is 0, and 0% when avg loss is MAX_AVG_EXPECTED_POINTS_LOSS_FOR_0_ACCURACY
         let accuracy = 100 * (1 - (averageExpectedPointsLost / this.MAX_AVG_EXPECTED_POINTS_LOSS_FOR_0_ACCURACY));
-        
+
         // This check is mostly for paranoia, but good to keep.
         if (isNaN(accuracy) || !isFinite(accuracy)) {
             console.error("[StockfishService] Invalid accuracy calculation resulted in NaN or Infinity:", {

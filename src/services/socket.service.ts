@@ -126,21 +126,26 @@ export const handleMove = async (socket: Socket, io: SocketIOServer, fastify: Fa
     }
 
     try {
+        // Calculate move duration
+        const now = Date.now();
+        const moveDuration = session.lastMoveTime ? now - session.lastMoveTime : 0;
+
         // Make the move in memory
         session.chess.move(move);
 
         // Save the move to the database with player color and ID
         const moveNumber = session.chess.history().length;
-        const color = isWhiteTurn ? 'w' : 'b';
+        const color = isWhiteTurn ? 'white' : 'black';
         const fen = session.chess.fen();
 
         // Save move with analysis (replaces saveMove)
-        const analysisPromise = saveMove(gameId, move, moveNumber, color, fen, currentPlayerId);
+        const analysisPromise = saveMove(gameId, move, moveNumber, color, currentPlayerId, moveDuration, fen);
         if (!analysisPromise) {
             console.error('Failed to save move analysis');
             socket.emit('error', { message: 'Failed to save move analysis' });
             return;
         }
+        session.lastMoveTime = now;
 
         // Broadcast the move to all players
         io.to(gameId).emit('gameState', {
@@ -361,11 +366,11 @@ export const handleSocketConnection = async (socket: CustomSocket, io: SocketIOS
         // If the game not in the system current session then create new game session
         if (!session) {
             console.log("Creating new game session for:", gameId);
-            
+
             // Get move history from database to restore game state
             const moves = await GameService.getGameMoves(gameId);
             const chess = new Chess();
-            
+
             // Replay moves to get current position
             if (moves && moves.length > 0) {
                 try {
@@ -374,7 +379,7 @@ export const handleSocketConnection = async (socket: CustomSocket, io: SocketIOS
                     console.error("Error replaying moves:", error);
                 }
             }
-            
+
             session = {
                 gameId,
                 players: [gameDoc.whitePlayerId, gameDoc.blackPlayerId], // Set players in correct order
@@ -383,7 +388,8 @@ export const handleSocketConnection = async (socket: CustomSocket, io: SocketIOS
                 status: GameStatus.active,
                 whiteTimeLeft: gameDoc.whiteTimeLeft || gameDoc.timeLimit,
                 blackTimeLeft: gameDoc.blackTimeLeft || gameDoc.timeLimit,
-                gameState: ''
+                gameState: '',
+                lastMoveTime: undefined
             };
             gameSessions.set(gameId, session);
         } else {
@@ -500,7 +506,7 @@ export const handleSocketConnection = async (socket: CustomSocket, io: SocketIOS
             }, 30000);
         }
     })
-    
+
     socket.on('leaveGame', async ({ gameId, userId }) => {
         const session = gameSessions.get(gameId);
         if (session && session.players.includes(userId)) {
@@ -509,5 +515,3 @@ export const handleSocketConnection = async (socket: CustomSocket, io: SocketIOS
         }
     });
 }
-
-

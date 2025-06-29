@@ -10,6 +10,7 @@ import { User } from '../models';
 import { GameHistoryItem, InMemoryGameSession, QueuedPlayer, WaitingPlayer } from '../types/game.types';
 import { CustomSocket } from '../types/socket.types';
 import { gameSessions } from './socket.service';
+import { timeStamp } from 'console';
 
 export const createGame = async (
     prisma: PrismaClient,
@@ -59,9 +60,10 @@ export const saveMove = async (
     gameId: string,
     move: string,
     moveNumber: number,
-    playerColor: 'w' | 'b',
+    playerColor: 'white' | 'black',
+    playerId: string,
+    moveDuration: number,
     fen: string,
-    playerId: string
 ): Promise<IMove | null> => {
     try {
         //console.log(`Starting analysis for move ${moveNumber}: ${move}`);
@@ -88,7 +90,9 @@ export const saveMove = async (
                         bestMoveExpectedPoints: 0, // Placeholder
                         expectedPointsLost: 0, // Placeholder
                         classification: 'Analyzing...',
-                        error: undefined
+                        error: undefined,
+                        timeStamp: new Date(),
+                        duration: moveDuration / 1000
                     }
                 }
             }
@@ -810,8 +814,8 @@ export async function getGameHistories(
 export const getGameAnalysis = async (gameId: string) => {
     try {
         const gameSession = await GameSession.findOne({ gameId })
-        .select('whiteAccuracyPoint blackAccuracyPoint moves')
-        .lean();
+            .select('whiteAccuracyPoint blackAccuracyPoint moves')
+            .lean();
         if (!gameSession) {
             throw new Error('Game not found');
         }

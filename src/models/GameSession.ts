@@ -34,13 +34,15 @@ export interface IMove {
     playerColor: 'w' | 'b';
     playerId: string;
     initialEvalCP: number,
-    moveEvalCP: number, 
+    moveEvalCP: number,
     initialExpectedPoints: number,
-    moveExpectedPoints: number, 
+    moveExpectedPoints: number,
     bestMoveExpectedPoints: number,
-    expectedPointsLost: number, 
+    expectedPointsLost: number,
     classification?: string,
     error?: string
+    timestamp: Date;
+    duration: number; // Duration in seconds
 }
 
 const MoveSchema = new Schema<IMove>({
@@ -54,13 +56,15 @@ const MoveSchema = new Schema<IMove>({
     playerColor: { type: String, required: true, enum: ['w', 'b'] },
     playerId: { type: String, required: true },
     initialEvalCP: { type: Number, required: true },
-    moveEvalCP: { type: Number, required: true }, 
+    moveEvalCP: { type: Number, required: true },
     initialExpectedPoints: { type: Number, required: true },
-    moveExpectedPoints: { type: Number, required: true }, 
+    moveExpectedPoints: { type: Number, required: true },
     bestMoveExpectedPoints: { type: Number, required: true },
-    expectedPointsLost: { type: Number, required: true }, 
+    expectedPointsLost: { type: Number, required: true },
     classification: { type: String, required: false },
-    error: { type: String, required: false }
+    error: { type: String, required: false },
+    timestamp: { type: Date, required: true },
+    duration: { type: Number, required: true },
 });
 
 const GameSessionSchema = new Schema<IGameSession>({
