@@ -3,6 +3,7 @@ import { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import fastifyWebsocket from '@fastify/websocket';
 import { Server as SocketIOServer } from 'socket.io';
 import { handleSocketConnection } from '../services/socket.service';
+import uiBasePath from '../types/uiPathConfig';
 
 const websocketPlugin: FastifyPluginAsync = fp(async (fastify: FastifyInstance) => {
     await fastify.register(fastifyWebsocket, {
@@ -14,7 +15,7 @@ const websocketPlugin: FastifyPluginAsync = fp(async (fastify: FastifyInstance) 
 
     const io: SocketIOServer = new SocketIOServer(fastify.server, {
         cors: {
-            origin: ["http://localhost:3000", "https://history-chess-game-front-end.onrender.com"],
+            origin: uiBasePath,
             methods: ["GET", "POST", "PUT", "DELETE"],
             allowedHeaders: ['Content-Type', 'Authorization'],
             credentials: true
@@ -29,7 +30,7 @@ const websocketPlugin: FastifyPluginAsync = fp(async (fastify: FastifyInstance) 
 
     // Set up CORS for HTTP handshake
     io.engine.on("headers", (headers, request) => {
-        headers["Access-Control-Allow-Origin"] = ["http://localhost:3000", "https://history-chess-game-front-end.onrender.com"];
+        headers["Access-Control-Allow-Origin"] = uiBasePath;
         headers["Access-Control-Allow-Credentials"] = "true";
     });
 
