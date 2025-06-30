@@ -1,6 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply, RouteGenericInterface } from "fastify";
 import { UserService, CreateUserInput, UpdateUserInput, UpdateProfileInput } from "../services/user.service";
 import { uploadController } from "../controllers/upload.controller";
+import uiBasePath from "../types/uiPathConfig";
 
 interface IdParams {
   id: string;
@@ -343,7 +344,7 @@ export default class UserController {
               type: 'google-auth-prompt-username',
               email: '${result.email}',
               tempToken: '${result.tempToken}'
-            }, 'http://localhost:3000');
+            }, '${uiBasePath}');
             window.close();
           </script>
         `);
@@ -357,7 +358,7 @@ export default class UserController {
               username: '${result.username}',
               email: '${result.email}',
               avatarUrl: '${result.avatarUrl || ''}'
-            }, 'http://localhost:3000');
+            }, '${uiBasePath}');
             window.close();
           </script>
         `);
@@ -369,7 +370,7 @@ export default class UserController {
           window.opener.postMessage({
             type: 'google-auth-error',
             error: '${message}'
-          }, 'http://localhost:3000');
+          }, '${uiBasePath}');
           window.close();
         </script>
       `);

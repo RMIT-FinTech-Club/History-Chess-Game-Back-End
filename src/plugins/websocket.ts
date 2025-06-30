@@ -29,7 +29,7 @@ const websocketPlugin: FastifyPluginAsync = fp(async (fastify: FastifyInstance) 
 
     // Set up CORS for HTTP handshake
     io.engine.on("headers", (headers, request) => {
-        headers["Access-Control-Allow-Origin"] = "http://localhost:3000";
+        headers["Access-Control-Allow-Origin"] = ["http://localhost:3000", "https://history-chess-game-front-end.onrender.com"];
         headers["Access-Control-Allow-Credentials"] = "true";
     });
 
