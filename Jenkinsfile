@@ -18,7 +18,7 @@ pipeline {
     // 'label' specifies a Jenkins agent label. Ensure your agent has Node.js and npm/yarn installed.
     // 'retries 1' makes the stage retry once if a non-resumable step fails due to a Jenkins restart.
     agent {
-        label any // IMPORTANT: Replace with the label of your Jenkins agent (e.g., 'linux-agent', 'node-builder')
+        any // IMPORTANT: Replace with the label of your Jenkins agent (e.g., 'linux-agent', 'node-builder')
         // Example for Docker agent (uncomment and modify if using Docker on your Jenkins agent):
         // docker {
         //     image 'node:18-alpine' // Use a Node.js Docker image
