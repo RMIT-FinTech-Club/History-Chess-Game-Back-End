@@ -53,13 +53,37 @@ pipeline {
             steps {
                 script {
                     echo 'Installing Node.js dependencies...'
-                    sh 'npm ci' // Use npm ci for clean and consistent installs
+                    sh 'node --version'
+                    sh 'npm --version'
+                    sh 'npm ci' 
+                    // Use npm ci for clean and consistent installs
                     // Alternative for Yarn users: sh 'yarn install --frozen-lockfile'
                 }
             }
         }
 
-        // Stage 3: TypeScript Syntax Check
+        // Stage 3: Code Validation
+        stage('Code Validation') {
+            parallel {
+                stage('Lint') {
+                    steps {
+                        script {
+                            // sh 'npm run lint'
+                            echo 'Run lint'
+                        }
+                    }
+                }
+                stage('Build') {
+                    steps {
+                        script {
+                            sh 'npm run build'
+                        }
+                    }
+                }
+            }
+        }
+
+        // Stage 4: TypeScript Syntax Check
         // Checks for TypeScript compilation errors without emitting JavaScript files.
         // Ensures type safety and syntax correctness.
         stage('TypeScript Syntax Check') {
@@ -71,7 +95,7 @@ pipeline {
             }
         }
 
-        // Stage 4: Snyk Security Scan
+        // Stage 5: Snyk Security Scan
         // Scans project dependencies and code for known vulnerabilities using Snyk.
         // `snykSecurity` is a step provided by the Snyk Security Plugin for Jenkins.
         // stage('Snyk Scan') {
@@ -92,7 +116,7 @@ pipeline {
         //     }
         // }
 
-        // Stage 5: SonarQube Analysis
+        // Stage 6: SonarQube Analysis
         // Performs static code analysis using SonarQube to detect bugs, vulnerabilities, and code smells.
         // `withSonarQubeEnv` is provided by the SonarQube Scanner for Jenkins plugin.
         // stage('SonarQube Analysis') {
@@ -109,7 +133,7 @@ pipeline {
         //     }
         // }
 
-        // Stage 6: Run Tests
+        // Stage 7: Run Tests
         // Executes your project's tests. It's crucial for verifying code correctness.
         // Assumes you have a test script defined in your package.json (e.g., "test": "jest" or "test": "node --test").
         // stage('Run Tests') {
@@ -122,7 +146,7 @@ pipeline {
         //     }
         // }
 
-        // Stage 7: Build/Package (Optional for Fastify)
+        // Stage 8: Build/Package (Optional for Fastify)
         // Fastify projects are typically JavaScript/TypeScript codebases that are run directly.
         // This stage can be used if you have a transpilation step (e.g., TypeScript to JavaScript)
         // or if you need to create a distributable package.
@@ -142,50 +166,45 @@ pipeline {
 
     // Post-build actions: Notifications, cleanup, etc.
     // These blocks execute after all stages have completed, regardless of their success or failure.
-    // post {
-    //     // 'always' block executes regardless of the pipeline's final status.
-    //     always {
-    //         script {
-    //             echo 'Archiving build artifacts...'
-    //             // Archive any generated reports or build artifacts for later inspection.
-    //             archiveArtifacts artifacts: 'snyk-report.json, **/*.log, **/*.html', fingerprint: true
-    //         }
-    //     }
-    //     // 'success' block executes only if the pipeline completes successfully.
-    //     success {
-    //         script {
-    //             echo 'Pipeline succeeded! Sending Slack notification.'
-    //             slackSend (
-    //                 channel: SLACK_CHANNEL,
-    //                 color: 'good', // Green color for success
-    //                 message: "SUCCESS: ${env.JOB_NAME} - Build #${env.BUILD_NUMBER} (${env.BUILD_URL})",
-    //                 webhook: SLACK_WEBHOOK_URL // Use the Slack webhook URL credential
-    //             )
-    //         }
-    //     }
-    //     // 'failure' block executes only if the pipeline fails.
-    //     failure {
-    //         script {
-    //             echo 'Pipeline failed! Sending Slack notification.'
-    //             slackSend (
-    //                 channel: SLACK_CHANNEL,
-    //                 color: 'danger', // Red color for failure
-    //                 message: "FAILED: ${env.JOB_NAME} - Build #${env.BUILD_NUMBER} (${env.BUILD_URL})",
-    //                 webhook: SLACK_WEBHOOK_URL
-    //             )
-    //         }
-    //     }
-    //     // 'aborted' block executes if the pipeline is manually stopped/aborted.
-    //     aborted {
-    //         script {
-    //             echo 'Pipeline aborted! Sending Slack notification.'
-    //             slackSend (
-    //                 channel: SLACK_CHANNEL,
-    //                 color: 'warning', // Yellow color for warning/aborted
-    //                 message: "ABORTED: ${env.JOB_NAME} - Build #${env.BUILD_NUMBER} (${env.BUILD_URL})",
-    //                 webhook: SLACK_WEBHOOK_URL
-    //             )
-    //         }
-    //     }
-    // }
+    post {
+        // 'always' block executes regardless of the pipeline's final status.
+        always {
+            cleanWs()
+            // script {
+            //     echo 'Archiving build artifacts...'
+            //     // Archive any generated reports or build artifacts for later inspection.
+            //     archiveArtifacts artifacts: 'snyk-report.json, **/*.log, **/*.html', fingerprint: true
+            // }
+        }
+        // 'success' block executes only if the pipeline completes successfully.
+        success {
+            script {
+                echo 'Pipeline succeeded! Sending Slack notification.'
+                slackSend (
+                    color: 'good', // Green color for success
+                    message: "SUCCESS: ${env.JOB_NAME} - Build #${env.BUILD_NUMBER} (${env.BUILD_URL})",
+                )
+            }
+        }
+        // 'failure' block executes only if the pipeline fails.
+        failure {
+            script {
+                echo 'Pipeline failed! Sending Slack notification.'
+                slackSend (
+                    color: 'danger', // Red color for failure
+                    message: "FAILED: ${env.JOB_NAME} - Build #${env.BUILD_NUMBER} (${env.BUILD_URL})",
+                )
+            }
+        }
+        // 'aborted' block executes if the pipeline is manually stopped/aborted.
+        aborted {
+            script {
+                echo 'Pipeline aborted! Sending Slack notification.'
+                slackSend (
+                    color: 'warning', // Yellow color for warning/aborted
+                    message: "ABORTED: ${env.JOB_NAME} - Build #${env.BUILD_NUMBER} (${env.BUILD_URL})",
+                )
+            }
+        }
+    }
 }
