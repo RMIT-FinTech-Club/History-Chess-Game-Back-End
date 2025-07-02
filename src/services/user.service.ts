@@ -502,7 +502,7 @@ export class UserService {
       }
 
       let cleanIdentifier: string;
-      let isEmail = validator.isEmail(identifier);
+      const isEmail = validator.isEmail(identifier);
       if (isEmail) {
         cleanIdentifier = this.validateEmail(identifier);
       } else {

@@ -180,7 +180,7 @@ export class StockfishService {
     // MODIFICATION 3: Extensive changes for robustness and defaulting
     public async analyzeAndClassifyMove(fenBeforeMove: string, moveDetails: Move, moveNumber: number): Promise<IMove> {
         // Initialize analysisResult with all fields, setting safe defaults
-        let analysisResult: IMove = {
+        const analysisResult: IMove = {
             playerId: '',
             moveNumber: moveNumber,
             move: moveDetails.san,

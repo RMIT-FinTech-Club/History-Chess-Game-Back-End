@@ -1,8 +1,8 @@
-import { Server as SocketIOServer, Socket } from "socket.io"
+import { Server as SocketIOServer, Socket } from "socket.io";
 import { Chess } from "chess.js";
-import fastify, { FastifyInstance } from "fastify"
-import { GameSession, IGameSession } from "../models/GameSession"
-import { GameStatus, PlayMode } from '../types/enum'
+import fastify, { FastifyInstance } from "fastify";
+import { GameSession, IGameSession } from "../models/GameSession";
+import { GameStatus, PlayMode } from '../types/enum';
 import { InMemoryGameSession } from '../types/game.types';
 import { CustomSocket } from '../types/socket.types';
 import * as GameService from "./game.service"
@@ -36,7 +36,7 @@ const startTimer = (session: InMemoryGameSession, io: SocketIOServer, fastify: F
         io.to(session.gameId).emit('timeUpdate', {
             whiteTimeLeft: session.whiteTimeLeft,
             blackTimeLeft: session.blackTimeLeft
-        })
+        });
     }, 1000)
 }
 
