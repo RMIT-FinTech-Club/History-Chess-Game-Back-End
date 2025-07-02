@@ -98,23 +98,23 @@ pipeline {
         // Stage 5: Snyk Security Scan
         // Scans project dependencies and code for known vulnerabilities using Snyk.
         // `snykSecurity` is a step provided by the Snyk Security Plugin for Jenkins.
-        // stage('Snyk Scan') {
-        //     steps {
-        //         script {
-        //             echo 'Running Snyk security scan...'
-        //             snykSecurity(
-        //                 snykInstallation: 'snyk-installer', // IMPORTANT: Replace with the name of your Snyk CLI installation in Jenkins
-        //                 snykTokenId: 'snyk',               // IMPORTANT: Replace with the ID of your Snyk API token credential in Jenkins
-        //                 targetFile: 'package.json',        // Specify the manifest file for Snyk to scan
-        //                 severityThreshold: 'low',          // Fail if any vulnerability (low, medium, high) is found
-        //                 failOn: 'all',                     // Fail the build if any vulnerability is found
-        //                 jsonFileOutput: 'snyk-report.json' // Save the Snyk report to a JSON file
-        //             )
-        //             // Optional: Run snyk monitor to continuously monitor your project in Snyk
-        //             // sh "snyk monitor --json-file-output=snyk-monitor-report.json"
-        //         }
-        //     }
-        // }
+        stage('Snyk Scan') {
+            steps {
+                script {
+                    echo 'Running Snyk security scan...'
+                    snykSecurity(
+                        snykInstallation: 'snyk-installer', // IMPORTANT: Replace with the name of your Snyk CLI installation in Jenkins
+                        snykTokenId: 'snyk',               // IMPORTANT: Replace with the ID of your Snyk API token credential in Jenkins
+                        targetFile: 'package.json',        // Specify the manifest file for Snyk to scan
+                        severityThreshold: 'low',          // Fail if any vulnerability (low, medium, high) is found
+                        failOn: 'all',                     // Fail the build if any vulnerability is found
+                        jsonFileOutput: 'snyk-report.json' // Save the Snyk report to a JSON file
+                    )
+                    // Optional: Run snyk monitor to continuously monitor your project in Snyk
+                    // sh "snyk monitor --json-file-output=snyk-monitor-report.json"
+                }
+            }
+        }
 
         // Stage 6: SonarQube Analysis
         // Performs static code analysis using SonarQube to detect bugs, vulnerabilities, and code smells.
