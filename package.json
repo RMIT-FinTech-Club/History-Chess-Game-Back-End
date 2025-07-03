@@ -8,7 +8,7 @@
     "start": "node dist/server.js",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
-    "dev": "nodemon --exec ts-node src/server.ts",
+    "dev": "nodemon src/server.ts",
     "build": "tsc --build",
     "prisma:generate": "npx prisma generate --schema=prisma/schema1.prisma",
     "prisma:push": "npx prisma db push --schema=prisma/schema1.prisma",
@@ -75,7 +75,7 @@
     "@eslint/js": "^9.30.1",
     "@types/bcrypt": "^5.0.2",
     "@types/jsonwebtoken": "^9.0.10",
-    "@types/node": "^24.0.8",
+    "@types/node": "^24.0.10",
     "@types/nodemailer": "^6.4.17",
     "@types/pg": "^8.15.4",
     "@types/swagger-jsdoc": "^6.0.4",
@@ -89,6 +89,7 @@
     "nodemon": "^3.1.10",
     "prisma": "^6.11.0",
     "ts-node": "^10.9.2",
+    "tsx": "^4.20.3",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.35.1"
   }

@@ -1,6 +1,3 @@
-import * as dotenv from 'dotenv';
-
-dotenv.config()
 // Define an interface for environment variables (for better type safety)
 interface EnvConfig {
     PRODUCTION: string;

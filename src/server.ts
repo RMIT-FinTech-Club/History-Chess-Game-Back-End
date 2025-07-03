@@ -15,7 +15,7 @@ import gameRoutes from './routes/game.routes';
 import * as GameController from './controllers/game.controller';
 import * as GameService from './services/game.service';
 import { PrismaClient } from '@prisma/client';
-import basePath from './types/pathConfig';
+import basePath from './types/pathConfig.ts';
 
 dotenv.config();
 
