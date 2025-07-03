@@ -3,20 +3,14 @@
 // Define the Node.js version to use (must match a configured NodeJS installation in Jenkins Global Tool Configuration)
 def NODEJS_TOOL_NAME = 'nodejs-installer' // IMPORTANT: Change this to the exact name of your configured Node.js tool in Jenkins
 
-// Define environment variables for SonarQube
-// SONAR_PROJECT_KEY: Unique key for your project in SonarQube. Recommended to be unique per project.
-// SONAR_PROJECT_NAME: Display name for your project in SonarQube.
-// SONAR_SOURCES: Directories to scan (e.g., 'src', '.' for the whole project).
-// SONAR_EXCLUSIONS: Files/directories to exclude from SonarQube scan (e.g., build artifacts, node_modules).
+// Define environment variables for SonarQube (uncomment and configure if used)
 // def SONAR_PROJECT_KEY = 'fastify-api'
 // def SONAR_PROJECT_NAME = 'My Fastify API'
-// def SONAR_SOURCES = '.' // Scan the entire project directory
+// def SONAR_SOURCES = '.'
 // def SONAR_EXCLUSIONS = 'node_modules/**, dist/**, build/**, coverage/**'
 
 pipeline {
     // Define the agent where the pipeline will run.
-    // 'label' specifies a Jenkins agent label. Ensure your agent has Node.js and npm/yarn installed.
-    // 'retries 1' makes the stage retry once if a non-resumable step fails due to a Jenkins restart.
     agent any
 
     // Define tools to be installed on the agent (e.g., Node.js)
@@ -24,19 +18,41 @@ pipeline {
         nodejs NODEJS_TOOL_NAME
     }
 
-    // Define environment variables for the pipeline.
-    // Credentials are retrieved using the `credentials()` helper and their IDs.
-    // environment {
-    //     SNYK_TOKEN = credentials('SNYK_TOKEN')         // Snyk API token from Jenkins Credentials
-    //     SONAR_TOKEN = credentials('SONAR_TOKEN')       // SonarQube token from Jenkins Credentials
-    //     SLACK_WEBHOOK_URL = credentials('SLACK_WEBHOOK_URL') // Slack Webhook URL from Jenkins Credentials
-    // }
+    environment {
+        SLACK_CHANNEL = "#all-rmit-fintech-club-tech-dept"
+        // Uncomment and configure these if you prefer to manage them as Pipeline environment variables
+        // rather than using global Slack configuration in Jenkins.
+        // SNYK_TOKEN = credentials('SNYK_TOKEN')
+        // SONAR_TOKEN = credentials('SONAR_TOKEN')
+        // SLACK_WEBHOOK_URL = credentials('SLACK_WEBHOOK_URL') // Example if using webhook URL from credentials
+    }
 
     // Stages define the sequential steps of your CI/CD pipeline
     stages {
-        // Stage 1: Checkout Code
-        // This stage fetches the latest code from your GitHub repository.
-        // It automatically uses the Git SCM configuration (including credentials) defined in the Jenkins job.
+        // Stage 1: Setup (Original 'Setyo' stage, renamed to 'Setup' for clarity)
+        stage('Setup') { // Renamed for better understanding
+            steps {
+                script {
+                    def triggerUser = getBuildUser()
+                    env.BUILD_USER = triggerUser
+                }
+                echo "Building branch: ${env.BRANCH_NAME}"
+                echo "Triggered by: ${env.BUILD_USER}"
+            }
+            post {
+                failure {
+                    slackSend(
+                        channel: env.SLACK_CHANNEL,
+                        color: 'danger',
+                        message: """
+                        :x: *Stage Failed: Setup* - ${env.JOB_NAME} #${env.BUILD_NUMBER} (${env.BUILD_URL})
+                        _Triggered by: ${env.BUILD_USER}_
+                        """
+                    )
+                }
+            }
+        }
+
         stage('Checkout') {
             steps {
                 script {
@@ -44,20 +60,40 @@ pipeline {
                     checkout scm // Checkout the SCM configured for this Jenkins job
                 }
             }
+            post {
+                failure {
+                    slackSend(
+                        channel: env.SLACK_CHANNEL,
+                        color: 'danger',
+                        message: """
+                        :x: *Stage Failed: Checkout* - ${env.JOB_NAME} #${env.BUILD_NUMBER} (${env.BUILD_URL})
+                        _Please check repository access or SCM configuration._
+                        """
+                    )
+                }
+            }
         }
 
         // Stage 2: Install Dependencies
-        // Installs all Node.js project dependencies using npm.
-        // `npm ci` is preferred in CI environments for clean and consistent installs based on package-lock.json.
         stage('Install Dependencies') {
             steps {
                 script {
                     echo 'Installing Node.js dependencies...'
                     sh 'node --version'
                     sh 'npm --version'
-                    sh 'npm ci' 
-                    // Use npm ci for clean and consistent installs
-                    // Alternative for Yarn users: sh 'yarn install --frozen-lockfile'
+                    sh 'npm ci'
+                }
+            }
+            post {
+                failure {
+                    slackSend(
+                        channel: env.SLACK_CHANNEL,
+                        color: 'danger',
+                        message: """
+                        :x: *Stage Failed: Install Dependencies* - ${env.JOB_NAME} #${env.BUILD_NUMBER} (${env.BUILD_URL})
+                        _Dependency installation failed. Check agent Node.js/npm setup or package.json/lock file._
+                        """
+                    )
                 }
             }
         }
@@ -68,8 +104,20 @@ pipeline {
                 stage('Lint') {
                     steps {
                         script {
-                            // sh 'npm run lint'
-                            echo 'Run lint'
+                            echo 'Running lint...'
+                            sh 'npm run lint' // Uncomment if you have a lint script
+                        }
+                    }
+                    post {
+                        failure {
+                            slackSend(
+                                channel: env.SLACK_CHANNEL,
+                                color: 'danger',
+                                message: """
+                                :x: *Stage Failed: Lint* - ${env.JOB_NAME} #${env.BUILD_NUMBER} (${env.BUILD_URL})
+                                _Linting errors detected. Please fix code style issues._
+                                """
+                            )
                         }
                     }
                 }
@@ -79,13 +127,23 @@ pipeline {
                             sh 'npm run build'
                         }
                     }
+                    post {
+                        failure {
+                            slackSend(
+                                channel: env.SLACK_CHANNEL,
+                                color: 'danger',
+                                message: """
+                                :x: *Stage Failed: Build* - ${env.JOB_NAME} #${env.BUILD_NUMBER} (${env.BUILD_URL})
+                                _Project build failed. Check compilation errors._
+                                """
+                            )
+                        }
+                    }
                 }
             }
         }
 
         // Stage 4: TypeScript Syntax Check
-        // Checks for TypeScript compilation errors without emitting JavaScript files.
-        // Ensures type safety and syntax correctness.
         stage('TypeScript Syntax Check') {
             steps {
                 script {
@@ -93,115 +151,169 @@ pipeline {
                     sh 'npx tsc --noEmit' // Runs TypeScript compiler in noEmit mode to only check for errors
                 }
             }
+            post {
+                failure {
+                    slackSend(
+                        channel: env.SLACK_CHANNEL,
+                        color: 'danger',
+                        message: """
+                        :x: *Stage Failed: TypeScript Syntax Check* - ${env.JOB_NAME} #${env.BUILD_NUMBER} (${env.BUILD_URL})
+                        _TypeScript compilation errors detected. Please fix type/syntax issues._
+                        """
+                    )
+                }
+            }
         }
 
         // Stage 5: Snyk Security Scan
-        // Scans project dependencies and code for known vulnerabilities using Snyk.
-        // `snykSecurity` is a step provided by the Snyk Security Plugin for Jenkins.
         stage('Snyk Scan') {
             steps {
                 script {
                     echo 'Running Snyk security scan...'
                     snykSecurity(
-                        snykInstallation: 'snyk-installer', // IMPORTANT: Replace with the name of your Snyk CLI installation in Jenkins
-                        snykTokenId: 'snyk',               // IMPORTANT: Replace with the ID of your Snyk API token credential in Jenkins
-                        targetFile: 'package.json',        // Specify the manifest file for Snyk to scan
-                        severityThreshold: 'low',          // Fail if any vulnerability (low, medium, high) is found
-                        failOn: 'all',                     // Fail the build if any vulnerability is found
-                        jsonFileOutput: 'snyk-report.json' // Save the Snyk report to a JSON file
+                        snykInstallation: 'snyk-installer', 
+                        snykTokenId: 'snyk',          
+                        severityThreshold: 'low',
+                        failOn: 'all',
+                        jsonFileOutput: 'snyk-report.json'
                     )
-                    // Optional: Run snyk monitor to continuously monitor your project in Snyk
-                    // sh "snyk monitor --json-file-output=snyk-monitor-report.json"
+                }
+            }
+            post {
+                failure {
+                    slackSend(
+                        channel: env.SLACK_CHANNEL,
+                        color: 'danger',
+                        message: """
+                        :x: *Stage Failed: Snyk Security Scan* - ${env.JOB_NAME} #${env.BUILD_NUMBER} (${env.BUILD_URL})
+                        _Snyk found vulnerabilities above threshold. Please review the report._
+                        """
+                    )
                 }
             }
         }
 
-        // Stage 6: SonarQube Analysis
-        // Performs static code analysis using SonarQube to detect bugs, vulnerabilities, and code smells.
-        // `withSonarQubeEnv` is provided by the SonarQube Scanner for Jenkins plugin.
-        // stage('SonarQube Analysis') {
-        //     steps {
-        //         script {
-        //             echo 'Running SonarQube analysis...'
-        //             withSonarQubeEnv(credentialsId: 'SONAR_TOKEN', installationName: 'My SonarQube') { // IMPORTANT: Replace 'My SonarQube' with your SonarQube server name configured in Jenkins
-        //                 sh "sonar-scanner -Dsonar.projectKey=${SONAR_PROJECT_KEY} " +
-        //                    "-Dsonar.projectName='${SONAR_PROJECT_NAME}' " +
-        //                    "-Dsonar.sources=${SONAR_SOURCES} " +
-        //                    "-Dsonar.exclusions=${SONAR_EXCLUSIONS}"
-        //             }
-        //         }
-        //     }
-        // }
+        // Stage 6: SonarQube Analysis (Uncomment and configure if used)
+        /*
+        stage('SonarQube Analysis') {
+            steps {
+                script {
+                    echo 'Running SonarQube analysis...'
+                    withSonarQubeEnv(credentialsId: 'SONAR_TOKEN', installationName: 'My SonarQube') { // IMPORTANT: Replace 'My SonarQube' with your SonarQube server name configured in Jenkins
+                        sh "sonar-scanner -Dsonar.projectKey=${SONAR_PROJECT_KEY} " +
+                            "-Dsonar.projectName='${SONAR_PROJECT_NAME}' " +
+                            "-Dsonar.sources=${SONAR_SOURCES} " +
+                            "-Dsonar.exclusions=${SONAR_EXCLUSIONS}"
+                    }
+                }
+            }
+            post {
+                failure {
+                    slackSend(
+                        channel: env.SLACK_CHANNEL,
+                        color: 'danger',
+                        message: """
+                        :x: *Stage Failed: SonarQube Analysis* - ${env.JOB_NAME} #${env.BUILD_NUMBER} (${env.BUILD_URL})
+                        _SonarQube analysis failed. Check quality gate or server connection._
+                        """
+                    )
+                }
+            }
+        }
+        */
 
-        // Stage 7: Run Tests
-        // Executes your project's tests. It's crucial for verifying code correctness.
-        // Assumes you have a test script defined in your package.json (e.g., "test": "jest" or "test": "node --test").
-        // stage('Run Tests') {
-        //     steps {
-        //         script {
-        //             echo 'Running tests...'
-        //             sh 'npm test' // Runs the 'test' script defined in package.json
-        //             // Alternative for Yarn users: sh 'yarn test'
-        //         }
-        //     }
-        // }
+        // Stage 7: Run Tests (Uncomment and configure if used)
+        /*
+        stage('Run Tests') {
+            steps {
+                script {
+                    echo 'Running tests...'
+                    sh 'npm test'
+                }
+            }
+            post {
+                failure {
+                    slackSend(
+                        channel: env.SLACK_CHANNEL,
+                        color: 'danger',
+                        message: """
+                        :x: *Stage Failed: Run Tests* - ${env.JOB_NAME} #${env.BUILD_NUMBER} (${env.BUILD_URL})
+                        _Tests failed. Please review test results._
+                        """
+                    )
+                }
+            }
+        }
+        */
 
-        // Stage 8: Build/Package (Optional for Fastify)
-        // Fastify projects are typically JavaScript/TypeScript codebases that are run directly.
-        // This stage can be used if you have a transpilation step (e.g., TypeScript to JavaScript)
-        // or if you need to create a distributable package.
-    //     stage('Build/Package') {
-    //         steps {
-    //             script {
-    //                 echo 'Fastify projects typically do not have a "build" step like frontend apps.'
-    //                 echo 'This stage can be used for transpilation (e.g., TypeScript to JavaScript) or packaging.'
-    //                 // Example: If you transpile TypeScript to JavaScript for deployment
-    //                 // sh 'npx tsc'
-    //                 // Or if you create a distributable package:
-    //                 // sh 'npm pack'
-    //             }
-    //         }
-    //     }
+        // Stage 8: Build/Package (Optional for Fastify) (Uncomment and configure if used)
+        /*
+        stage('Build/Package') {
+            steps {
+                script {
+                    echo 'Fastify projects typically do not have a "build" step like frontend apps.'
+                    echo 'This stage can be used for transpilation (e.g., TypeScript to JavaScript) or packaging.'
+                    // Example: If you transpile TypeScript to JavaScript for deployment
+                    // sh 'npx tsc'
+                    // Or if you create a distributable package:
+                    // sh 'npm pack'
+                }
+            }
+            post {
+                failure {
+                    slackSend(
+                        channel: env.SLACK_CHANNEL,
+                        color: 'danger',
+                        message: """
+                        :x: *Stage Failed: Build/Package* - ${env.JOB_NAME} #${env.BUILD_NUMBER} (${env.BUILD_URL})
+                        _Build or packaging process failed._
+                        """
+                    )
+                }
+            }
+        }
+        */
     }
 
     // Post-build actions: Notifications, cleanup, etc.
-    // These blocks execute after all stages have completed, regardless of their success or failure.
     post {
-        // 'always' block executes regardless of the pipeline's final status.
         always {
             cleanWs()
-            // script {
-            //     echo 'Archiving build artifacts...'
-            //     // Archive any generated reports or build artifacts for later inspection.
-            //     archiveArtifacts artifacts: 'snyk-report.json, **/*.log, **/*.html', fingerprint: true
-            // }
+            // Optional: Archive any generated reports or build artifacts
+            /*
+            script {
+                echo 'Archiving build artifacts...'
+                archiveArtifacts artifacts: 'snyk-report.json, **/*.log, **/*.html', fingerprint: true
+            }
+            */
         }
-        // 'success' block executes only if the pipeline completes successfully.
         success {
             script {
                 echo 'Pipeline succeeded! Sending Slack notification.'
                 slackSend (
-                    color: 'good', // Green color for success
+                    channel: env.SLACK_CHANNEL,
+                    color: 'good',
                     message: "SUCCESS: ${env.JOB_NAME} - Build #${env.BUILD_NUMBER} (${env.BUILD_URL})",
                 )
             }
         }
-        // 'failure' block executes only if the pipeline fails.
         failure {
             script {
                 echo 'Pipeline failed! Sending Slack notification.'
                 slackSend (
-                    color: 'danger', // Red color for failure
-                    message: "FAILED: ${env.JOB_NAME} - Build #${env.BUILD_NUMBER} (${env.BUILD_URL})",
+                    channel: env.SLACK_CHANNEL,
+                    color: 'danger',
+                    message: "OVERALL FAILED: ${env.JOB_NAME} - Build #${env.BUILD_NUMBER} (${env.BUILD_URL})",
+                    // You might want to adjust this overall message if stage-level failures are handled
                 )
             }
         }
-        // 'aborted' block executes if the pipeline is manually stopped/aborted.
         aborted {
             script {
                 echo 'Pipeline aborted! Sending Slack notification.'
                 slackSend (
-                    color: 'warning', // Yellow color for warning/aborted
+                    channel: env.SLACK_CHANNEL,
+                    color: 'warning',
                     message: "ABORTED: ${env.JOB_NAME} - Build #${env.BUILD_NUMBER} (${env.BUILD_URL})",
                 )
             }
