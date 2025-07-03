@@ -32,12 +32,8 @@ pipeline {
         // Stage 1: Setup (Original 'Setyo' stage, renamed to 'Setup' for clarity)
         stage('Setup') { // Renamed for better understanding
             steps {
-                script {
-                    def triggerUser = getBuildUser()
-                    env.BUILD_USER = triggerUser
-                }
                 echo "Building branch: ${env.BRANCH_NAME}"
-                echo "Triggered by: ${env.BUILD_USER}"
+                echo "Triggered by: ${env.BUILD_USER}, ${env.BUILD_USER_ID}"
             }
             post {
                 failure {
