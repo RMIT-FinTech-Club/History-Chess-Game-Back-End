@@ -280,12 +280,12 @@ pipeline {
         always {
             cleanWs()
             // Optional: Archive any generated reports or build artifacts
-            /*
-            script {
-                echo 'Archiving build artifacts...'
-                archiveArtifacts artifacts: 'snyk-report.json, **/*.log, **/*.html', fingerprint: true
-            }
-            */
+            // /*
+            // script {
+            //     echo 'Archiving build artifacts...'
+            //     archiveArtifacts artifacts: 'snyk-report.json, **/*.log, **/*.html', fingerprint: true
+            // }
+            // */
         }
         success {
             script {
