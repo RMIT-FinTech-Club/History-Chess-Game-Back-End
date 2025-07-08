@@ -110,7 +110,7 @@ server.register(mongodbPlugin)
 server.register(neonPlugin)
 server.register(websocketPlugin)
 server.register(prismaPlugin)
-// server.register(gameRoutes)
+server.register(gameRoutes)
 
 //Register Routes
 server.register(userRoutes);

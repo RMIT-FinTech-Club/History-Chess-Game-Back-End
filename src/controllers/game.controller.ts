@@ -4,6 +4,7 @@ import { FastifyReply, FastifyRequest } from 'fastify';
 import { createGame, findMatch } from '../services/game.service';
 import { PrismaClient } from '@prisma/client';
 import { PlayMode } from '../types/enum';
+import { GameSession } from 'models/GameSession';
 
 // export const handleJoinGame = (socket: Socket, io: SocketIOServer, playerElo: number): void => {
 //     GameServices.joinGame(socket, io, playerElo);
@@ -15,11 +16,12 @@ export const handleDisconnect = (socket: Socket, reason: string): void => {
 
 // Handle Create New Game Request
 export const createNewGame = async (req: FastifyRequest, res: FastifyReply) => {
-  const { userId, playMode, colorPreference } = req.body as any
+  const { userId, playMode, colorPreference, opponentId } = req.body as any
   console.log(userId)
   console.log(playMode)
   console.log(colorPreference)
-  const gameId: string = await createGame(req.server.prisma, userId, playMode, colorPreference)
+  console.log(opponentId)
+  const gameId: string = await createGame(req.server.prisma, userId, playMode, colorPreference, opponentId)
   const gameLink = `${req.protocol}://${req.hostname}/game/join/${gameId}`;
 
   return res.code(201).send({ gameId: gameId, gameLink: gameLink })
@@ -135,5 +137,39 @@ export const getGameAnalysis = async (req: FastifyRequest, res: FastifyReply) =>
     // anything else → 500
     console.error(err);
     return res.status(500).send({ error: 'Failed to retrieve game analysis' });
+  }
+};
+
+export const finalizeGameResult = async (req: FastifyRequest, res: FastifyReply) => {
+  const { gameId, resultString } = req.body as { gameId: string; resultString: string };
+
+  if (!gameId || !resultString) {
+    return res.status(400).send({ error: 'gameId and resultString are required' });
+  }
+
+  try {
+    await GameServices.saveGameResult(gameId, resultString);
+
+    const game = await GameSession.findOne({ gameId });
+    if (!game) {
+      return res.status(404).send({ error: 'Game not found' });
+    }
+
+    const winnerId = game.winner ?? null;
+
+    const result = await GameServices.updateElo(req.server.prisma, gameId, winnerId);
+
+    if (!result) {
+      return res.status(404).send({ error: 'Failed to update ELO rating' });
+    }
+
+    return res.status(200).send({
+      message: 'Game result saved and ELO updated',
+      result,
+    });
+
+  } catch (err) {
+    console.error('Failed to finalize game result:', err);
+    return res.status(500).send({ error: 'Internal server error' });
   }
 };

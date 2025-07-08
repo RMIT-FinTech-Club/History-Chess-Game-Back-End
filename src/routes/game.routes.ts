@@ -1,5 +1,5 @@
 import fastify, { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
-import { createNewGame, findNewMatch, getGameHistory, getGameMoves, getGameAnalysis } from "../controllers/game.controller";
+import { createNewGame, findNewMatch, getGameHistory, getGameMoves, getGameAnalysis, finalizeGameResult } from "../controllers/game.controller";
 import { stockfishService } from "../services/stockfish.service";
 import { authenticate } from "../middleware/auth";
 
@@ -10,6 +10,7 @@ const gameRoutes: FastifyPluginAsync = async (fastify) => {
     fastify.get('/history/:userId', {preHandler: authenticate}, getGameHistory);
     fastify.get('/history/detail/:gameId', {preHandler: authenticate}, getGameMoves);
     fastify.get('/analysis/:gameId', {preHandler: authenticate}, getGameAnalysis);
+    fastify.post('/elo', finalizeGameResult);
 }
 
 export default gameRoutes;

@@ -19,6 +19,7 @@ export const createGame = async (
     colorPreference: 'white' | 'black' | 'random' = 'random',
     opponentId?: string
 ): Promise<string> => {
+    console.log(opponentId)
     const user = await prisma.users.findUnique({ where: { id: userId } });
     if (!user) {
         throw new Error(`User with ID ${userId} not found`);
