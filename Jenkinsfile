@@ -94,50 +94,50 @@ pipeline {
             }
         }
 
-        // // Stage 3: Code Validation
-        // stage('Code Validation') {
-        //     parallel {
-        //         stage('Lint') {
-        //             steps {
-        //                 script {
-        //                     echo 'Running lint...'
-        //                     sh 'npm run lint' // Uncomment if you have a lint script
-        //                 }
-        //             }
-        //             post {
-        //                 failure {
-        //                     slackSend(
-        //                         channel: env.SLACK_CHANNEL,
-        //                         color: 'danger',
-        //                         message: """
-        //                         :x: *Stage Failed: Lint* - ${env.JOB_NAME} #${env.BUILD_NUMBER} (${env.BUILD_URL})
-        //                         _Linting errors detected. Please fix code style issues._
-        //                         """
-        //                     )
-        //                 }
-        //             }
-        //         }
-        //         stage('Build') {
-        //             steps {
-        //                 script {
-        //                     sh 'npm run build'
-        //                 }
-        //             }
-        //             post {
-        //                 failure {
-        //                     slackSend(
-        //                         channel: env.SLACK_CHANNEL,
-        //                         color: 'danger',
-        //                         message: """
-        //                         :x: *Stage Failed: Build* - ${env.JOB_NAME} #${env.BUILD_NUMBER} (${env.BUILD_URL})
-        //                         _Project build failed. Check compilation errors._
-        //                         """
-        //                     )
-        //                 }
-        //             }
-        //         }
-        //     }
-        // }
+        // Stage 3: Code Validation
+        stage('Code Validation') {
+            parallel {
+                stage('Lint') {
+                    steps {
+                        script {
+                            echo 'Running lint...'
+                            sh 'npm run lint' // Uncomment if you have a lint script
+                        }
+                    }
+                    post {
+                        failure {
+                            slackSend(
+                                channel: env.SLACK_CHANNEL,
+                                color: 'danger',
+                                message: """
+                                :x: *Stage Failed: Lint* - ${env.JOB_NAME} #${env.BUILD_NUMBER} (${env.BUILD_URL})
+                                _Linting errors detected. Please fix code style issues._
+                                """
+                            )
+                        }
+                    }
+                }
+                stage('Build') {
+                    steps {
+                        script {
+                            sh 'npm run build'
+                        }
+                    }
+                    post {
+                        failure {
+                            slackSend(
+                                channel: env.SLACK_CHANNEL,
+                                color: 'danger',
+                                message: """
+                                :x: *Stage Failed: Build* - ${env.JOB_NAME} #${env.BUILD_NUMBER} (${env.BUILD_URL})
+                                _Project build failed. Check compilation errors._
+                                """
+                            )
+                        }
+                    }
+                }
+            }
+        }
 
         // Stage 4: TypeScript Syntax Check
         stage('TypeScript Syntax Check') {
