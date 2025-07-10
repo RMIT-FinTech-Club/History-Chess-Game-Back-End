@@ -1,6 +1,6 @@
-import fastify, { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
+import { FastifyPluginAsync } from "fastify";
 import { createNewGame, findNewMatch, getGameHistory, getGameMoves, getGameAnalysis } from "../controllers/game.controller";
-import { stockfishService } from "../services/stockfish.service";
+//import { stockfishService } from "../services/stockfish.service";
 import { authenticate } from "../middleware/auth";
 
 

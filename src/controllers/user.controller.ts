@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply, RouteGenericInterface } from "fastify";
 import { UserService, CreateUserInput, UpdateUserInput, UpdateProfileInput } from "../services/user.service";
-import { uploadController } from "../controllers/upload.controller";
+//import { uploadController } from "../controllers/upload.controller";
 import uiBasePath from "../types/uiPathConfig";
 
 interface IdParams {

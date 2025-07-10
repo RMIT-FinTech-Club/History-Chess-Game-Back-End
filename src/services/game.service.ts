@@ -6,11 +6,11 @@ import { GameSession, IGameSession, IMove } from '../models/GameSession';
 import { PlayMode, GameResult, GameStatus } from '../types/enum';
 import validator from 'validator';
 import { stockfishService } from './stockfish.service';
-import { User } from '../models';
+//import { User } from '../models';
 import { GameHistoryItem, InMemoryGameSession, QueuedPlayer, WaitingPlayer } from '../types/game.types';
 import { CustomSocket } from '../types/socket.types';
 import { gameSessions } from './socket.service';
-import { timeStamp } from 'console';
+//import { timeStamp } from 'console';
 
 export const createGame = async (
     prisma: PrismaClient,

@@ -11,7 +11,7 @@ import {
   uploadAvatarSchema,
 } from './schemas/userSchema';
 import { authenticate, authorize } from '../middleware/auth';
-import basePath from '../types/pathConfig';
+//import basePath from '../types/pathConfig';
 
 // Define request interfaces to match schemas
 interface IdParams {

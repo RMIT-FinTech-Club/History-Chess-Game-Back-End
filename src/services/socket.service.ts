@@ -1,13 +1,13 @@
 import { Server as SocketIOServer, Socket } from "socket.io";
 import { Chess } from "chess.js";
-import fastify, { FastifyInstance } from "fastify";
-import { GameSession, IGameSession } from "../models/GameSession";
+import { FastifyInstance } from "fastify";
+import { GameSession } from "../models/GameSession";
 import { GameStatus, PlayMode } from '../types/enum';
 import { InMemoryGameSession } from '../types/game.types';
 import { CustomSocket } from '../types/socket.types';
 import * as GameService from "./game.service"
-import { saveGameResult, saveMove, updateElo } from "./game.service"
-import { StockfishService } from "./stockfish.service";
+import { saveMove } from "./game.service"
+//simport { StockfishService } from "./stockfish.service";
 
 
 export const gameSessions = new Map<string, InMemoryGameSession>();

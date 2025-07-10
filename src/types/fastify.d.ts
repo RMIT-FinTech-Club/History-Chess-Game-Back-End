@@ -1,4 +1,4 @@
-import { MongoClient } from 'mongodb';
+//import { MongoClient } from 'mongodb';
 import { Pool } from '@neondatabase/serverless';
 import { PrismaClient } from '@prisma/client/edge';
 import mongoose from 'mongoose';
