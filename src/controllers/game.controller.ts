@@ -15,7 +15,11 @@ export const handleDisconnect = (socket: Socket, reason: string): void => {
 
 // Handle Create New Game Request
 export const createNewGame = async (req: FastifyRequest, res: FastifyReply) => {
-  const { userId, playMode, colorPreference } = req.body as any
+  const { userId, playMode, colorPreference } = req.body as {
+    userId: string;
+    playMode: PlayMode;
+    colorPreference: 'white' | 'black' | 'random';
+  };
   console.log(userId)
   console.log(playMode)
   console.log(colorPreference)
@@ -27,7 +31,12 @@ export const createNewGame = async (req: FastifyRequest, res: FastifyReply) => {
 
 // Handle Find Match Request
 export const findNewMatch = async (req: FastifyRequest, res: FastifyReply) => {
-  const { userId, playMode, colorPreference, socketId } = req.body as any;
+  const { userId, playMode, colorPreference, socketId } = req.body as {
+    userId: string;
+    playMode: PlayMode;
+    colorPreference: 'white' | 'black' | 'random';
+    socketId: string;
+  };
 
   if (!socketId) {
     return res.code(400).send({ error: 'Socket ID is required' });
@@ -88,7 +97,9 @@ export const handleChallengeResponse = async (
 };
 
 export const getGameHistory = async (req: FastifyRequest, res: FastifyReply) => {
-  const { userId } = req.params as any;
+  const { userId } = req.params as {
+    userId: string;
+  };
   try {
     const history = await GameServices.getGameHistories(userId);
     return res.send(history);
@@ -106,7 +117,9 @@ export const getGameHistory = async (req: FastifyRequest, res: FastifyReply) => 
 
 
 export const getGameMoves = async (req: FastifyRequest, res: FastifyReply) => {
-  const { gameId } = req.params as any;
+  const { gameId } = req.params as {
+    gameId: string;
+  };
   try {
     const moves = await GameServices.retrieveGameMoves(gameId);
     return res.send(moves);
@@ -123,7 +136,9 @@ export const getGameMoves = async (req: FastifyRequest, res: FastifyReply) => {
 
 
 export const getGameAnalysis = async (req: FastifyRequest, res: FastifyReply) => {
-  const { gameId } = req.params as any;
+  const { gameId } = req.params as {
+    gameId: string;
+  };
   try {
     const analysis = await GameServices.getGameAnalysis(gameId);
     return res.send(analysis);
