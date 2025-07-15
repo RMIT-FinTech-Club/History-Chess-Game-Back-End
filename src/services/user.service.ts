@@ -46,6 +46,15 @@ interface TempTokenPayload {
 
 type JWTPayload = UserTokenPayload | TempTokenPayload;
 
+//Define a type for updateData
+interface UpdateData {
+  username?: string;
+  email?: string;
+  hashedPassword?: string;
+  walletAddress?: string | null;
+  avatarUrl?: string | null;
+}
+
 export class UserService {
   private jwtSecret: string;
   private transporter: nodemailer.Transporter;
@@ -261,9 +270,8 @@ export class UserService {
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       };
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      throw new Error(message);
+    } catch {
+      throw new Error('Unknown error');
     }
   }
 
@@ -308,9 +316,8 @@ export class UserService {
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       };
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      throw new Error(message);
+    } catch {
+      throw new Error('Unknown error');
     }
   }
 
@@ -363,9 +370,8 @@ export class UserService {
         offset,
         token,
       };
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      throw new Error(message);
+    } catch {
+      throw new Error('Unknown error');
     }
   }
 
@@ -382,7 +388,7 @@ export class UserService {
     updatedAt: Date;
   } | null> {
     try {
-      const updateData: any = {};
+      const updateData: UpdateData = {};
 
       if (data.username) updateData.username = this.validateUsername(data.username);
       if (data.email) updateData.email = this.validateEmail(data.email);
@@ -407,7 +413,7 @@ export class UserService {
         createdAt: updatedUser.createdAt,
         updatedAt: updatedUser.updatedAt,
       };
-    } catch (error: unknown) {
+    } catch {
       return null;
     }
   }
@@ -425,7 +431,7 @@ export class UserService {
     updatedAt: Date;
   } | null> {
     try {
-      const updateData: any = {};
+      const updateData: UpdateData = {};
 
       if (data.username) {
         const cleanUsername = this.validateUsername(data.username);
@@ -467,7 +473,7 @@ export class UserService {
         createdAt: updatedUser.createdAt,
         updatedAt: updatedUser.updatedAt,
       };
-    } catch (error: unknown) {
+    } catch {
       return null;
     }
   }
@@ -478,7 +484,7 @@ export class UserService {
         where: { id },
       });
       return true;
-    } catch (error: unknown) {
+    } catch {
       return false;
     }
   }
@@ -531,7 +537,7 @@ export class UserService {
             this.logger.warn(`Invalid token for user: ${cleanIdentifier}`);
             throw new Error('Invalid token');
           }
-        } catch (error) {
+        } catch {
           this.logger.warn(`Token verification failed for login: ${cleanIdentifier}`);
           throw new Error('Invalid or expired token');
         }
@@ -562,9 +568,8 @@ export class UserService {
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       };
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      throw new Error(message);
+    } catch {
+      throw new Error('Unknown error');
     }
   }
 
@@ -589,9 +594,8 @@ export class UserService {
         console.warn(`Username mismatch: token=${decoded.username}, db=${user.username}`);
       }
       return { id: decoded.id, username: decoded.username, googleAuth: decoded.googleAuth };
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error(`Token verification failed: ${message}`);
+    } catch {
+      this.logger.error(`Token verification failed: Invalid token`);
       throw new Error('Invalid token');
     }
   }
@@ -620,10 +624,9 @@ export class UserService {
 
       await this.transporter.sendMail(mailOptions);
       this.logger.info(`Verification code sent to ${cleanEmail}`);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error(`Failed to send verification code to ${email}: ${message}`);
-      throw new Error(`Failed to send verification code: ${message}`);
+    } catch {
+      this.logger.error(`Failed to send verification code to ${email}: Unknown error`);
+      throw new Error(`Failed to send verification code: Unknown error`);
     }
   }
 
@@ -651,9 +654,8 @@ export class UserService {
         this.logger.warn(`Expired reset code attempt for ${cleanEmail}`);
         throw new Error('Verification code expired');
       }
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      throw new Error(message);
+    } catch {
+      throw new Error('Unknown error');
     }
   }
 
@@ -712,9 +714,8 @@ export class UserService {
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       };
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      throw new Error(message);
+    } catch {
+      throw new Error('Unknown error');
     }
   }
 
@@ -753,9 +754,8 @@ export class UserService {
         where: { id: userId },
         data: { hashedPassword },
       });
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      throw new Error(message);
+    } catch {
+      throw new Error('Unknown error');
     }
   }
 
@@ -768,10 +768,9 @@ export class UserService {
         prompt: 'consent',
       });
       return authUrl;
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error(`Google auth error: ${message}`);
-      throw new Error(message);
+    } catch {
+      this.logger.error(`Google auth error: Unknown error`);
+      throw new Error('Unknown error');
     }
   }
 
@@ -834,10 +833,9 @@ export class UserService {
       const tempToken = jwt.sign({ email } as TempTokenPayload, this.jwtSecret, { expiresIn: '10m' });
       console.log('Generated tempToken:', tempToken);
       return { email, tempToken };
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error(`Google callback error: ${message}, stack: ${error instanceof Error ? error.stack : undefined}`);
-      throw new Error(message || 'Failed to authenticate with Google');
+    } catch {
+      this.logger.error(`Google callback error: Unknown error`);
+      throw new Error('Failed to authenticate with Google');
     }
   }
 
@@ -899,10 +897,9 @@ export class UserService {
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       };
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error(`Google login completion error: ${message}, stack: ${error instanceof Error ? error.stack : undefined}`);
-      throw new Error(message || 'Failed to complete Google login');
+    } catch {
+      this.logger.error(`Google login completion error: Unknown error`);
+      throw new Error('Failed to complete Google login');
     }
   }
 
@@ -915,9 +912,8 @@ export class UserService {
         throw new Error('Email not found');
       }
       return { googleAuth: user.googleAuth };
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      throw new Error(message);
+    } catch {
+      throw new Error('Unknown error');
     }
   }
 }
