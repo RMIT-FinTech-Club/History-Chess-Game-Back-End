@@ -304,7 +304,7 @@ export const findMatch = async (
     }
 
     // Try to find a match
-    const matchIndex = matchmakingQueue.findIndex((player, index) => {
+    const matchIndex = matchmakingQueue.findIndex((player) => {
         if (player.userId === userId) return false; // Don't match with self
 
         // Check play mode
@@ -513,7 +513,7 @@ export const createNewGameSession = (socket1: Socket, socket2: Socket): InMemory
 //     }
 // }
 
-export const handleDisconnect = (socket: Socket, reason: string): void => {
+export const handleDisconnect = (socket: Socket): void => {
     const index = waitingPlayers.findIndex(player => player.socket.id === socket.id);
     if (index > -1) {
         waitingPlayers.splice(index, 1);
@@ -672,9 +672,11 @@ export const respondToChallenge = async (
             gameId
         };
     } catch (error) {
+        console.error('Error creating game session:', error);
         return {
             success: false,
-            message: 'Failed to create game session'
+            message: 'Failed to create game session',
+            
         };
     }
 };
@@ -766,7 +768,7 @@ export async function getGameHistories(
             where: { id: { in: opponentIds } },
             select: { id: true, username: true }
         });
-        const nameById = new Map<string, string>(users.map((u: { id: any; username: any; }) => [u.id, u.username]));
+        const nameById = new Map<string, string>(users.map((u: { id: string, username: string }) => [u.id, u.username]));
 
         // ----- 4) Map to the slim DTO -----
         return sessions.map(s => {
@@ -799,7 +801,7 @@ export async function getGameHistories(
                 result
             };
         });
-    } catch (err: any) {
+    } catch (err) {
         // Log the full error for debugging
         console.error(`Failed to fetch game history for ${userId}`, err);
         // Convert any non-ValidationError into a generic service error
@@ -866,7 +868,7 @@ export const retrieveGameMoves = async (gameId: string) => {
             gameId: game.gameId,
             moves: game.moves,
         };
-    } catch (err: any) {
+    } catch (err) {
         if (err instanceof ValidationError) throw err;
         console.error(`Error retrieving moves for game ${gameId}:`, err);
         throw new Error('Failed to retrieve game moves. Please try again later.');
