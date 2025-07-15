@@ -29,7 +29,7 @@ const websocketPlugin: FastifyPluginAsync = fp(async (fastify: FastifyInstance) 
     });
 
     // Set up CORS for HTTP handshake
-    io.engine.on("headers", (headers, request) => {
+    io.engine.on("headers", (headers) => {
         headers["Access-Control-Allow-Origin"] = uiBasePath;
         headers["Access-Control-Allow-Credentials"] = "true";
     });
