@@ -3,7 +3,9 @@ import { Prisma } from '@prisma/client';
 // Interface for the user profile
 export interface UserProfile extends Prisma.usersGetPayload<{
     include: { games: true; ownedNFTs: true };
-}>{}
+}>{
+    _marker?: never;
+}
 
 // Interface for profile update
 export interface UserProfileUpdate {
