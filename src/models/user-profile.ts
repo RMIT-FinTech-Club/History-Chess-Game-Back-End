@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 
 // Interface for the user profile
 export interface UserProfile extends Prisma.usersGetPayload<{
@@ -31,6 +32,7 @@ export const userProfileSchema = {
             items: {
                 type: 'object',
                 // Define properties specific to your games model
+            } 
             } 
         },
         createdAt: { type: 'string', format: 'date-time' },
