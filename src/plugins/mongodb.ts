@@ -25,9 +25,13 @@ const mongodbPlugin: FastifyPluginAsync = fp(async (fastify: FastifyInstance) =>
         });
 
         fastify.log.info('MongoDB connected successfully with Mongoose');
-    } catch (error: any) {
+    } catch (error: unknown) {
         fastify.log.error('MongoDB connection failed with Mongoose:', error);
-        throw new Error(`Failed to connect to MongoDB with Mongoose: ${error.message}`);
+        if (error instanceof Error) {
+            throw new Error(`Failed to connect to MongoDB with Mongoose: ${error.message}`);
+        } else {
+            throw new Error('Failed to connect to MongoDB with Mongoose due to an unknown error');
+        }
     }
 }, {
     name: 'mongodb',
