@@ -480,7 +480,7 @@ export const handleSocketConnection = async (socket: CustomSocket, io: SocketIOS
 
         // Remove user from online users
         if (onlineUsers.has(socket.id)) {
-            const { userId } = onlineUsers.get(socket.id)!;
+            // const { userId } = onlineUsers.get(socket.id)!;
             onlineUsers.delete(socket.id);
             // Notify all clients about the updated online users
             io.emit('onlineUsers', Array.from(onlineUsers.values()).map(u => u.userId));
