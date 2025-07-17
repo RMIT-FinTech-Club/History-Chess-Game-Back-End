@@ -88,9 +88,10 @@ export const handleChallengeResponse = async (
 };
 
 export const getGameHistory = async (req: FastifyRequest, res: FastifyReply) => {
-  const { userId } = req.params as any;
+  const { userId } = req.params as { userId: string };
+  const { limit, offset, cachedTimestamp } = req.query as { limit?: number; offset?: number; cachedTimestamp?: any };
   try {
-    const history = await GameServices.getGameHistories(userId);
+    const history = await GameServices.getGameHistories(userId, limit, offset, cachedTimestamp);
     return res.send(history);
   } catch (err) {
     if (err instanceof GameServices.ValidationError) {
@@ -106,7 +107,8 @@ export const getGameHistory = async (req: FastifyRequest, res: FastifyReply) => 
 
 
 export const getGameMoves = async (req: FastifyRequest, res: FastifyReply) => {
-  const { gameId } = req.params as any;
+  const { gameId } = req.params as { gameId: string};
+
   try {
     const moves = await GameServices.retrieveGameMoves(gameId);
     return res.send(moves);

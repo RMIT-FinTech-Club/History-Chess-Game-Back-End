@@ -29,9 +29,17 @@ export interface QueuedPlayer {
     timestamp: number;
 }
 
-export interface GameHistoryItem {
+export interface GameHistory {
+  data: {
+    gameId: string;
     opponentName: string | null;
     gameMode: string;
     totalTime: number;
     result: 'Victory' | 'Defeat' | 'Draw';
+  }[];
+  pagination: {
+    currentPage: number;
+    totalPages: number;
+    totalRecords: number;
+  };
 }

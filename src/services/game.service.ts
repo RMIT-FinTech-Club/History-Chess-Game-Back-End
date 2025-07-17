@@ -7,7 +7,7 @@ import { PlayMode, GameResult, GameStatus } from '../types/enum';
 import validator from 'validator';
 import { stockfishService } from './stockfish.service';
 //import { User } from '../models';
-import { GameHistoryItem, InMemoryGameSession, QueuedPlayer, WaitingPlayer } from '../types/game.types';
+import { GameHistory, InMemoryGameSession, QueuedPlayer, WaitingPlayer } from '../types/game.types';
 import { CustomSocket } from '../types/socket.types';
 import { gameSessions } from './socket.service';
 //import { timeStamp } from 'console';
@@ -711,8 +711,6 @@ export const getUserNameById = async (userId: string): Promise<string | null> =>
     }
 };
 
-
-
 export class ValidationError extends Error {
     constructor(message: string) {
         super(message);
@@ -727,8 +725,9 @@ export class ValidationError extends Error {
 export async function getGameHistories(
     userId: string,
     limit = 10,
-    skip = 0
-): Promise<GameHistoryItem[]> {
+    offset = 0,
+    cachedTimestamp?: string | null
+): Promise<GameHistory> {
     // ----- 1) Validate parameters -----
     if (!validator.isUUID(userId, 4)) {
         throw new ValidationError('Invalid userId: must be a valid UUID v4');
@@ -736,23 +735,54 @@ export async function getGameHistories(
     if (!validator.isInt(String(limit), { min: 1, max: 1000 })) {
         throw new ValidationError('Invalid limit: must be an integer between 1 and 1000');
     }
-    if (!validator.isInt(String(skip), { min: 0 })) {
+    if (!validator.isInt(String(offset), { min: 0 })) {
         throw new ValidationError('Invalid skip: must be a non‑negative integer');
     }
 
     try {
+        let totalRecords: number = 0;
+        let totalPages: number = 0;
+        const parsedCachedTimestamp = cachedTimestamp ? new Date(cachedTimestamp) : null;
+        const currentPage: number = Math.floor(offset / limit) + 1;
+
+        // Check the most recent document's timestamp
+        const latestMatch = await GameSession.findOne({
+            $or: [{ whitePlayerId: userId }, { blackPlayerId: userId }],
+        })
+            .sort({ updatedAt: -1 })
+            .select('updatedAt')
+            .lean();
+
+        if (
+            !parsedCachedTimestamp ||
+            isNaN(parsedCachedTimestamp.getTime()) ||
+            (latestMatch && latestMatch.startTime > parsedCachedTimestamp)
+        ) {
+            totalRecords = await GameSession.countDocuments({
+                $or: [{ whitePlayerId: userId }, { blackPlayerId: userId }],
+            });
+            totalPages = Math.ceil(totalRecords / limit);
+        }
+
         // ----- 2) Fetch data -----
         const sessions = await GameSession.find({
             $or: [{ whitePlayerId: userId }, { blackPlayerId: userId }]
         })
-            .select('whitePlayerId blackPlayerId startTime endTime result playMode')
+            .select('whitePlayerId blackPlayerId startTime endTime result playMode _id')
             .sort({ startTime: -1 })
-            .skip(skip)
+            .skip(offset)
             .limit(limit)
             .lean();
 
         if (sessions.length === 0) {
-            return [];
+            return {
+                data: [],
+                pagination: {
+                    currentPage: 1,
+                    totalPages: 0,
+                    totalRecords: 0,
+                },
+            };
         }
 
         // ----- 3) Batch opponent ID → name lookup -----
@@ -766,21 +796,21 @@ export async function getGameHistories(
             where: { id: { in: opponentIds } },
             select: { id: true, username: true }
         });
-        const nameById = new Map<string, string>(users.map((u: { id: any; username: any; }) => [u.id, u.username]));
+        const nameById = new Map<string, string>(users.map((u: { id: string, username: string }) => [u.id, u.username]));
 
         // ----- 4) Map to the slim DTO -----
-        return sessions.map(s => {
+        const data = sessions.map((s) => {
             const iAmWhite = s.whitePlayerId === userId;
             const oppId = iAmWhite ? s.blackPlayerId : s.whitePlayerId;
-            const oppName = oppId ? (nameById.get(oppId) || null) : null;
+            const oppName = oppId ? nameById.get(oppId) || null : null;
 
-            // compute total seconds
+            // Compute total seconds
             const startMs = new Date(s.startTime!).getTime();
             const endMs = new Date(s.endTime!).getTime();
             const totalSec = Math.floor((endMs - startMs) / 1000);
 
-            // derive result from stored session.result
-            let result: GameHistoryItem['result'];
+            // Derive result from stored session.result
+            let result: 'Victory' | 'Defeat' | 'Draw';
             if (s.result === '1/2-1/2') {
                 result = 'Draw';
             } else if (
@@ -793,13 +823,27 @@ export async function getGameHistories(
             }
 
             return {
+                gameId: s._id.toString(),
                 opponentName: oppName,
                 gameMode: s.playMode,
                 totalTime: totalSec,
-                result
+                result,
             };
         });
-    } catch (err: any) {
+
+        // ----- 6) Prepare pagination metadata -----
+        const pagination = {
+            currentPage,
+            totalPages,
+            totalRecords,
+        };  
+
+        // ----- 7) Return response -----
+        return {
+            data,
+            pagination,
+        };
+    } catch (err) {
         // Log the full error for debugging
         console.error(`Failed to fetch game history for ${userId}`, err);
         // Convert any non-ValidationError into a generic service error
@@ -866,7 +910,7 @@ export const retrieveGameMoves = async (gameId: string) => {
             gameId: game.gameId,
             moves: game.moves,
         };
-    } catch (err: any) {
+    } catch (err) {
         if (err instanceof ValidationError) throw err;
         console.error(`Error retrieving moves for game ${gameId}:`, err);
         throw new Error('Failed to retrieve game moves. Please try again later.');
