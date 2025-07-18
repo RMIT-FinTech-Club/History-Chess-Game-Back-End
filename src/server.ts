@@ -36,7 +36,6 @@ server.register(fastifyJwt, {
   secret: process.env.JWT_SECRET || 'your-secret-key',
 });
 
-
 // Register OAuth2 for Google
 server.register(fastifyOAuth2, {
   name: 'googleOAuth2',
@@ -98,7 +97,7 @@ server.register(import('@fastify/swagger-ui'), {
     deepLinking: true,
   },
   uiHooks: {
-    onRequest: function (request, reply, next) { next(); },
+    onRequest: function (_request, _reply, next) { next(); },
     preHandler: function (request, reply, next) { next(); },
   },
   staticCSP: true,
@@ -164,16 +163,17 @@ server.get('/', async (request, reply) => {
 
 server.get('/health', async (request, reply) => {
   try {
-    await (server as any).neon.query('SELECT 1');
+    await (server.neon as unknown as { query: (sql: string) => Promise<unknown> }).query('SELECT 1');
     return {
       status: 'ok',
       mongodb: 'connected',
       neon: 'connected',
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
     reply.status(500).send({
       status: 'error',
-      message: error.message,
+      message: message,
       details: process.env.NODE_ENV === 'development' ? error : undefined,
     });
   }

@@ -32,7 +32,7 @@ interface ProfileUpdateRoute extends RouteGenericInterface {
 }
 interface AvatarRequest {
   Params: { id: string };
-  Body: { file: any }; // Multipart file
+  Body: { file: unknown }; // Multipart file
   Headers: { authorization?: string };
 }
 
@@ -135,5 +135,5 @@ export default async function userRoutes(fastify: FastifyInstance) {
     handler: async (request: FastifyRequest<AvatarRequest>, reply: FastifyReply) => {
       await uploadController.deleteAvatar(request, reply, fastify);
     },
-  });
+  }); 
 }
