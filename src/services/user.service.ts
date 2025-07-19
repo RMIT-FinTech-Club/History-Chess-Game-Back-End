@@ -225,7 +225,7 @@ export class UserService {
         updatedAt: user.updatedAt,
       };
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred during user creation.';
       throw new Error(message);
     }
   }
@@ -270,8 +270,9 @@ export class UserService {
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       };
-    } catch {
-      throw new Error('Unknown error');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred while fetching user by ID.';
+      throw new Error(message);
     }
   }
 
@@ -316,8 +317,9 @@ export class UserService {
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       };
-    } catch {
-      throw new Error('Unknown error');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred while fetching user by email.';
+      throw new Error(message);
     }
   }
 
@@ -370,8 +372,9 @@ export class UserService {
         offset,
         token,
       };
-    } catch {
-      throw new Error('Unknown error');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred while fetching all users.';
+      throw new Error(message);
     }
   }
 
@@ -413,8 +416,9 @@ export class UserService {
         createdAt: updatedUser.createdAt,
         updatedAt: updatedUser.updatedAt,
       };
-    } catch {
-      return null;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred during user update.';
+      throw new Error(message);
     }
   }
 
@@ -473,8 +477,9 @@ export class UserService {
         createdAt: updatedUser.createdAt,
         updatedAt: updatedUser.updatedAt,
       };
-    } catch {
-      return null;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred during profile update.';
+      throw new Error(message);
     }
   }
 
@@ -484,8 +489,9 @@ export class UserService {
         where: { id },
       });
       return true;
-    } catch {
-      return false;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred during user deletion.';
+      throw new Error(message);
     }
   }
 
@@ -568,8 +574,9 @@ export class UserService {
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       };
-    } catch {
-      throw new Error('Unknown error');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred during login.';
+      throw new Error(message);
     }
   }
 
@@ -594,9 +601,10 @@ export class UserService {
         console.warn(`Username mismatch: token=${decoded.username}, db=${user.username}`);
       }
       return { id: decoded.id, username: decoded.username, googleAuth: decoded.googleAuth };
-    } catch {
-      this.logger.error(`Token verification failed: Invalid token`);
-      throw new Error('Invalid token');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred during token verification.';
+      this.logger.error(`Token verification failed: ${message}`);
+      throw new Error(message);
     }
   }
 
@@ -624,9 +632,10 @@ export class UserService {
 
       await this.transporter.sendMail(mailOptions);
       this.logger.info(`Verification code sent to ${cleanEmail}`);
-    } catch {
-      this.logger.error(`Failed to send verification code to ${email}: Unknown error`);
-      throw new Error(`Failed to send verification code: Unknown error`);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred during password reset request.';
+      this.logger.error(`Failed to send verification code to ${email}: ${message}`);
+      throw new Error(message);
     }
   }
 
@@ -654,8 +663,9 @@ export class UserService {
         this.logger.warn(`Expired reset code attempt for ${cleanEmail}`);
         throw new Error('Verification code expired');
       }
-    } catch {
-      throw new Error('Unknown error');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred during reset code verification.';
+      throw new Error(message);
     }
   }
 
@@ -714,8 +724,9 @@ export class UserService {
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       };
-    } catch {
-      throw new Error('Unknown error');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred during password reset.';
+      throw new Error(message);
     }
   }
 
@@ -754,8 +765,9 @@ export class UserService {
         where: { id: userId },
         data: { hashedPassword },
       });
-    } catch {
-      throw new Error('Unknown error');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred during password update.';
+      throw new Error(message);
     }
   }
 
@@ -768,9 +780,10 @@ export class UserService {
         prompt: 'consent',
       });
       return authUrl;
-    } catch {
-      this.logger.error(`Google auth error: Unknown error`);
-      throw new Error('Unknown error');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred during Google auth.';
+      this.logger.error(`Google auth error: ${message}`);
+      throw new Error(message);
     }
   }
 
@@ -833,9 +846,10 @@ export class UserService {
       const tempToken = jwt.sign({ email } as TempTokenPayload, this.jwtSecret, { expiresIn: '10m' });
       console.log('Generated tempToken:', tempToken);
       return { email, tempToken };
-    } catch {
-      this.logger.error(`Google callback error: Unknown error`);
-      throw new Error('Failed to authenticate with Google');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred during Google callback.';
+      this.logger.error(`Google callback error: ${message}`);
+      throw new Error(message);
     }
   }
 
@@ -897,9 +911,10 @@ export class UserService {
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       };
-    } catch {
-      this.logger.error(`Google login completion error: Unknown error`);
-      throw new Error('Failed to complete Google login');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred during Google login completion.';
+      this.logger.error(`Google login completion error: ${message}`);
+      throw new Error(message);
     }
   }
 
@@ -912,8 +927,9 @@ export class UserService {
         throw new Error('Email not found');
       }
       return { googleAuth: user.googleAuth };
-    } catch {
-      throw new Error('Unknown error');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unexpected error occurred while checking authentication type.';
+      throw new Error(message);
     }
   }
 }
