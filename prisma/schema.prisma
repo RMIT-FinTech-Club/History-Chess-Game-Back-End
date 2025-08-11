@@ -18,10 +18,11 @@ model users {
   language       String   @default("en")
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
-  googleAuth    Boolean  @default(false)
+  googleAuth     Boolean  @default(false)
 
   ownedNFTs nfts[]
   games     games[]
+
 }
 
 model nfts {
