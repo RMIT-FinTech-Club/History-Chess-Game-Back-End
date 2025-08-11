@@ -10,12 +10,14 @@ import neonPlugin from './plugins/neon';
 import mongodbPlugin from './plugins/mongodb';
 import websocketPlugin from './plugins/websocket';
 import prismaPlugin from './plugins/prisma';
+import walletRoutes from 'routes/wallet.routes';
 import userRoutes from './routes/user.routes';
 import gameRoutes from './routes/game.routes';
 //import * as GameController from './controllers/game.controller';
 //import * as GameService from './services/game.service';
 import { PrismaClient } from '@prisma/client';
 import basePath from './types/pathConfig.ts';
+
 
 dotenv.config();
 
@@ -113,7 +115,8 @@ server.register(prismaPlugin)
 
 //Register Routes
 server.register(userRoutes);
-server.register(gameRoutes, { prefix: '/game' })
+server.register(gameRoutes, { prefix: '/game' });
+server.register(walletRoutes);
 
 server.ready(() => {
 
