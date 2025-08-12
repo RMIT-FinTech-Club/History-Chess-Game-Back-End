@@ -30,9 +30,9 @@ export const getWalletBalanceSchema = {
 						pendingTransactions: { type: 'number', description: 'Number of pending transactions' },
 						lastUpdated: { type: 'string', format: 'date-time' }
 					},
-					// required: ['userId', 'totalGameCoins', 'confirmedGameCoins', 'pendinggameCoins', 'pendingTransactions', 'lastUpdated']
+					
 				},
-				// require: ['success', 'data']
+				
 			}
 
 		},
@@ -85,10 +85,8 @@ export const getWalletStatusSchema = {
 						pendingCount: { type: 'number', description: 'Number of pending transactions' },
 						lastActivity: { type: 'string', format: 'date-time', description: 'Last wallet activity' }
 					},
-					// required: ['userId', 'hasWallet', 'totalBalance', 'hasPendingRewards', 'pendingCount', 'lastActivity']
 				}
 			},
-			// required: ['success', 'data']
 		},
 		403: {
 			type: 'object',
@@ -96,7 +94,6 @@ export const getWalletStatusSchema = {
 				success: { type: 'boolean' },
 				error: { type: 'string' }
 			},
-			// required: ['success', 'error']
 		},
 		500: {
 			type: 'object',
@@ -104,7 +101,7 @@ export const getWalletStatusSchema = {
 				success: { type: 'boolean' },
 				error: { type: 'string' }
 			},
-			// required: ['success', 'error']
+
 		}
 	}
 };

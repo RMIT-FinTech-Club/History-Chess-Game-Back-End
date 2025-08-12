@@ -7,14 +7,14 @@ import mongoose from 'mongoose';
 
 export class GameRewardHandler {
 	private static blockchainService = new BlockchainService();
-	
+
 	/**
 	 * END GAME PROCESSOR
 	 * Called when there is a winner
 	 * Does the reward flow from game to blockchain
 	 */
 	static async handleGameEnd(gameSession: IGameSession, io?: any): Promise<void> {
-		if(gameSession.status !== 'finished' ||!gameSession.winner) {
+		if (gameSession.status !== 'finished' || !gameSession.winner) {
 			return;
 		}
 
@@ -24,8 +24,13 @@ export class GameRewardHandler {
 				where: { id: gameSession.winner }
 			});
 
-			if(!winner?.walletAddress){
+			if (!winner?.walletAddress) {
 				console.log(`Can't find wallet address, skipping the reward`);
+				return;
+			}
+
+			if (!winner.walletAddress) {
+				console.log(`Winner ${gameSession.winner} has no wallet address.`);
 				return;
 			}
 
@@ -59,6 +64,15 @@ export class GameRewardHandler {
 			await gameReward.save();
 			console.log(`Game reward record was created: ${gameReward._id}`);
 
+			// Create/Update PlayerBalance record
+			await this.createOrUpdatePlayerBalance(
+				gameSession.winner,
+				winner.walletAddress,
+				rewardAmount,
+				matchType,
+				(gameReward._id as any).toString()
+			)
+
 			// Balance update
 			await this.blockchainService.updateBalanceOptimistic(
 				gameSession.winner,
@@ -69,7 +83,7 @@ export class GameRewardHandler {
 			);
 
 			// UI Update
-			if(io) {
+			if (io) {
 				const balanceInfo = await this.blockchainService.getPlayerBalance(gameSession.winner);
 
 				io.to(gameSession.winner).emit('balanceUpdate', {
@@ -91,25 +105,25 @@ export class GameRewardHandler {
 				try {
 					await this.blockchainService.processGameReward(gameReward);
 					console.log(`Blockchain reward processing initiated for ${winner.username}`);
-				} catch(error) {
+				} catch (error) {
 					console.error('Blockchain reward failed (logged for retry):', error);
 				}
 			});
 
 
-		} catch(error) {
+		} catch (error) {
 			console.error('Error in game reward handler');
 			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
 			// Log any failtures for revision, avoiding breaking the game
-			if(gameSession.winner) {
+			if (gameSession.winner) {
 				try {
 					const winner = await postgresPrisma.users.findUnique({
 						where: { id: gameSession.winner }
 					});
 
 					const db = mongoose.connection.db;
-					if(!db) {
+					if (!db) {
 						console.error('MongoDB connection not available, cant log failed transaction');
 						return;
 					}
@@ -126,39 +140,207 @@ export class GameRewardHandler {
 						lastAttemptAt: new Date(),
 						retryCount: 0
 					})
-				} catch(logerror) {
+				} catch (logerror) {
 					console.error('Failed to log game reward error');
 				}
 			}
 		}
 	}
 
+	static async createOrUpdatePlayerBalance(
+		userId: string,
+		walletAddress: string,
+		rewardAmount: string,
+		matchType: 'PvP' | 'Bot',
+		gameRewardId: string
+	): Promise<void> {
+		try {
+			const { PlayerBalance } = await import('../models/playerBalance');
+
+			// Find existing balance
+			const existingBalance = await PlayerBalance.findOne({ userId });
+
+			let newPendingBalance: string;
+			if (existingBalance) {
+				const currentPending = existingBalance.pendingBalance || '0';
+				newPendingBalance = (BigInt(currentPending) + BigInt(rewardAmount)).toString();
+			} else {
+				// New user
+				newPendingBalance = rewardAmount;
+			}
+
+			// Create or update
+			await PlayerBalance.findOneAndUpdate(
+				{ userId },
+				{
+					$set: {
+						walletAddress: walletAddress.toLowerCase(),
+						pendingBalance: newPendingBalance,
+						lastUpdated: new Date(),
+						needsSync: false
+					},
+					$inc: {
+						version: 1
+					},
+					$push: {
+						pendingTransactions: {
+							transactionHash: `pending-${gameRewardId}`,
+							amount: rewardAmount,
+							type: matchType,
+							status: `pending`,
+							createdAt: new Date()
+						}
+					}
+				},
+				{
+					upsert: true,
+					new: true
+				}
+			)
+
+			console.log(`PlayerBalance updated for user ${userId}: +${Web3.utils.fromWei(rewardAmount, 'ether')} GC`);
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+			console.error(`Error updating PlayerBalance for ${userId}: `, errorMessage);
+			throw error;
+		}
+	}
+
 	// Use API endpoints to show the player's balance 
+	// static async getPlayerGameCoinBalance(userId: string): Promise<{
+	// 	totalGameCoins: string;
+	// 	confirmedGameCoins: string;
+	// 	pendingGameCoins: string;
+	// 	pendingTransactions: number;
+	// 	lastUpdated: Date | null;
+	// }> {
+	// 	try {
+
+	// 		// Check if user exists and has wallet
+	// 		const user = await postgresPrisma.users.findUnique({
+	// 			where: { id: userId },
+	// 			select: { walletAddress: true, username: true }
+	// 		});
+
+
+	// 		if (!user) {
+	// 			throw new Error(`User ${userId} not found`);
+	// 		} else {
+	// 			console.log(`[getPlayerGameCoinBalance] User found:`, user);
+	// 		}
+
+	// 		// If no wallet adddress, return zeros for balance
+	// 		if (!user.walletAddress) {
+	// 			console.log(`User ${userId} has no wallet address configured`);
+	// 			return {
+	// 				totalGameCoins: '0',
+	// 				confirmedGameCoins: '0',
+	// 				pendingGameCoins: '0',
+	// 				pendingTransactions: 0,
+	// 				lastUpdated: new Date()
+	// 			};
+	// 		}
+
+	// 		const { PlayerBalance } = await import('../models/playerBalance');
+	// 		const playerBalance = await PlayerBalance.findOne({ userId });
+
+	// 		if (!playerBalance) {
+	// 			// User has wallet but no balance record yet
+	// 			return {
+	// 				totalGameCoins: '0.0000',
+	// 				confirmedGameCoins: '0.0000',
+	// 				pendingGameCoins: '0.0000',
+	// 				pendingTransactions: 0,
+	// 				lastUpdated: new Date()
+	// 			};
+	// 		}
+
+	// 		const confirmed = playerBalance.balance || '0';
+	// 		const pending = playerBalance.pendingBalance || '0';
+	// 		const total = (BigInt(confirmed) + BigInt(pending)).toString();
+	// 		const pendingCount = playerBalance.pendingTransactions?.filter(tx => tx.status === 'pending').length || 0;
+
+	// 		return {
+	// 			totalGameCoins: Web3.utils.fromWei(total, 'ether'),
+	// 			confirmedGameCoins: Web3.utils.fromWei(confirmed, 'ether'),
+	// 			pendingGameCoins: Web3.utils.fromWei(pending, 'ether'),
+	// 			pendingTransactions: pendingCount,
+	// 			lastUpdated: playerBalance.lastUpdated || new Date()
+	// 		};
+	// 	} catch (error) {
+	// 		const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+	// 		console.error(`Error fetching GameCoin balance for ${userId}:`, errorMessage);
+
+	// 		return {
+	// 			totalGameCoins: '0',
+	// 			confirmedGameCoins: '0',
+	// 			pendingGameCoins: '0',
+	// 			pendingTransactions: 0,
+	// 			lastUpdated: null
+	// 		};
+	// 	}
+	// }
+
+	// Replace your getPlayerGameCoinBalance method in gameRewardHandler.ts with this:
+
 	static async getPlayerGameCoinBalance(userId: string): Promise<{
 		totalGameCoins: string;
 		confirmedGameCoins: string;
 		pendingGameCoins: string;
 		pendingTransactions: number;
 		lastUpdated: Date | null;
-	}>{
+	}> {
 		try {
-			const balanceInfo = await this.blockchainService.getPlayerBalance(userId);
+			console.log(`[getPlayerGameCoinBalance] Starting for userId: ${userId}`);
 
+			// Check if user exists and has wallet
+			const user = await postgresPrisma.users.findUnique({
+				where: { id: userId },
+				select: { walletAddress: true, username: true }
+			});
+
+			console.log(`[getPlayerGameCoinBalance] User found:`, user);
+
+			if (!user) {
+				console.log(`[getPlayerGameCoinBalance] User ${userId} not found`);
+				throw new Error(`User ${userId} not found`);
+			}
+
+			// If no wallet address, return zeros (this is correct behavior)
+			if (!user.walletAddress) {
+				console.log(`[getPlayerGameCoinBalance] User ${user.username} has no wallet address - returning zeros`);
+				return {
+					totalGameCoins: '0.0000',
+					confirmedGameCoins: '0.0000',
+					pendingGameCoins: '0.0000',
+					pendingTransactions: 0,
+					lastUpdated: new Date()
+				};
+			}
+
+			console.log(`[getPlayerGameCoinBalance] User ${user.username} has wallet: ${user.walletAddress}`);
+
+			// Since playerbalances collection is empty, return zeros for now
+			// This is correct behavior until user earns some GameCoins
+			console.log(`[getPlayerGameCoinBalance] PlayerBalance collection is empty - returning zeros`);
 			return {
-        		totalGameCoins: Web3.utils.fromWei(balanceInfo.total, 'ether'),
-				confirmedGameCoins: Web3.utils.fromWei(balanceInfo.confirmed, 'ether'),
-				pendingGameCoins: Web3.utils.fromWei(balanceInfo.pending, 'ether'),
-				pendingTransactions: balanceInfo.pendingCount,
+				totalGameCoins: '0.0000',
+				confirmedGameCoins: '0.0000',
+				pendingGameCoins: '0.0000',
+				pendingTransactions: 0,
 				lastUpdated: new Date()
 			};
-		} catch(error) {
-			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-			console.error(`Error fetching GameCoin balance for ${userId}:`, errorMessage);
 
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+			console.error(`[getPlayerGameCoinBalance] Error:`, errorMessage);
+			console.error(`[getPlayerGameCoinBalance] Full stack:`, error);
+
+			// Always return zero balances on error instead of throwing
 			return {
-				totalGameCoins: '0',
-				confirmedGameCoins: '0', 
-				pendingGameCoins: '0',
+				totalGameCoins: '0.0000',
+				confirmedGameCoins: '0.0000',
+				pendingGameCoins: '0.0000',
 				pendingTransactions: 0,
 				lastUpdated: null
 			};
@@ -166,7 +348,7 @@ export class GameRewardHandler {
 	}
 
 	// Shows all GameCoins earned from chess games
-		static async getPlayerRewardHistory(userId: string, limit: number = 10): Promise<Array<{
+	static async getPlayerRewardHistory(userId: string, limit: number = 10): Promise<Array<{
 		gameSessionId: string;
 		rewardAmount: string;
 		matchType: 'PvP' | 'Bot';
@@ -176,121 +358,121 @@ export class GameRewardHandler {
 		transactionHash?: string;
 	}>> {
 		try {
-		const rewards = await GameReward.find({ winnerId: userId })
-			.sort({ gameEndTime: -1 })  // Most recent first
-			.limit(limit)
-			.lean();  // Return plain objects, not Mongoose documents
-		
-		// Convert to human-readable format
-		return rewards.map(reward => ({
-			gameSessionId: reward.gameSessionId,
-			rewardAmount: Web3.utils.fromWei(reward.rewardAmount, 'ether'),
-			matchType: reward.matchType,
-			gameResult: reward.gameResult,
-			gameEndTime: reward.gameEndTime,
-			confirmed: reward.confirmed,
-			transactionHash: reward.transactionHash
-		}));
+			const rewards = await GameReward.find({ winnerId: userId })
+				.sort({ gameEndTime: -1 })  // Most recent first
+				.limit(limit)
+				.lean();  // Return plain objects, not Mongoose documents
+
+			// Convert to human-readable format
+			return rewards.map(reward => ({
+				gameSessionId: reward.gameSessionId,
+				rewardAmount: Web3.utils.fromWei(reward.rewardAmount, 'ether'),
+				matchType: reward.matchType,
+				gameResult: reward.gameResult,
+				gameEndTime: reward.gameEndTime,
+				confirmed: reward.confirmed,
+				transactionHash: reward.transactionHash
+			}));
 		} catch (error) {
-		console.error(`Error fetching reward history for ${userId}:`, error);
-		return [];
+			console.error(`Error fetching reward history for ${userId}:`, error);
+			return [];
 		}
 	}
 
 	static async retryFailedRewards(): Promise<void> {
 		try {
-		console.log('Starting failed reward retry process...');
-		
-		// Find failed transactions that haven't exceeded max retry attempts
-		const db = mongoose.connection.db;
+			console.log('Starting failed reward retry process...');
 
-		if (!db) {
-			console.error('MongoDB connection not available, cannot retry failed rewards');
-			return;
-		}
+			// Find failed transactions that haven't exceeded max retry attempts
+			const db = mongoose.connection.db;
 
-		const failedTransactions = await db.collection('failedblockchaintransactions')
-			.find({
-			status: { $in: ['pending', 'retrying'] },
-			retryCount: { $lt: 3 }, // Max 3 retries
-			// Only retry transactions from the last 24 hours
-			firstAttemptAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
-			})
-			.limit(10) // Process in batches to avoid overwhelming the system
-			.toArray();
-		
-		console.log(`🔍 Found ${failedTransactions.length} failed transactions to retry`);
-		
-		for (const failedTx of failedTransactions) {
-			try {
-			console.log(`Retrying reward for user ${failedTx.userId}, game ${failedTx.gameSessionId}`);
-			
-			// Find the original game session
-			const gameSession = await db.collection('gamesessions').findOne({ 
-				gameId: failedTx.gameSessionId 
-			});
-			
-			if (gameSession) {
-				// Update retry status
-				await db.collection('failedblockchaintransactions').updateOne(
-				{ _id: failedTx._id },
-				{
-					$set: { 
-					status: 'retrying',
-					lastAttemptAt: new Date()
-					},
-					$inc: { retryCount: 1 }
-				}
-				);
-				
-				// Attempt to process the reward again
-				await this.handleGameEnd(gameSession as any);
-				
-				// If successful, mark as resolved
-				await db.collection('failedblockchaintransactions').updateOne(
-				{ _id: failedTx._id },
-				{
-					$set: { 
-					status: 'resolved',
-					resolvedAt: new Date()
-					}
-				}
-				);
-				
-				console.log(`Successfully retried reward for user ${failedTx.userId}`);
-			} else {
-				// Game session not found, mark as abandoned
-				await db.collection('failedblockchaintransactions').updateOne(
-				{ _id: failedTx._id },
-				{ $set: { status: 'abandoned' } }
-				);
+			if (!db) {
+				console.error('MongoDB connection not available, cannot retry failed rewards');
+				return;
 			}
-			
-			// Small delay between retries to avoid overwhelming the system
-			await new Promise(resolve => setTimeout(resolve, 1000));
-			
-			} catch (retryError) {
-				const errorMessage = retryError instanceof Error ? retryError.message : 'Unknown error';
-				console.error(`Retry failed for transaction ${failedTx._id}:`, errorMessage);
-				
-				// Update error information
-				await db.collection('failedblockchaintransactions').updateOne(
-					{ _id: failedTx._id },
-					{
-					$set: { 
-						error: errorMessage,
-						lastAttemptAt: new Date(),
-						status: failedTx.retryCount >= 2 ? 'abandoned' : 'pending'
+
+			const failedTransactions = await db.collection('failedblockchaintransactions')
+				.find({
+					status: { $in: ['pending', 'retrying'] },
+					retryCount: { $lt: 3 }, // Max 3 retries
+					// Only retry transactions from the last 24 hours
+					firstAttemptAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
+				})
+				.limit(10) // Process in batches to avoid overwhelming the system
+				.toArray();
+
+			console.log(`🔍 Found ${failedTransactions.length} failed transactions to retry`);
+
+			for (const failedTx of failedTransactions) {
+				try {
+					console.log(`Retrying reward for user ${failedTx.userId}, game ${failedTx.gameSessionId}`);
+
+					// Find the original game session
+					const gameSession = await db.collection('gamesessions').findOne({
+						gameId: failedTx.gameSessionId
+					});
+
+					if (gameSession) {
+						// Update retry status
+						await db.collection('failedblockchaintransactions').updateOne(
+							{ _id: failedTx._id },
+							{
+								$set: {
+									status: 'retrying',
+									lastAttemptAt: new Date()
+								},
+								$inc: { retryCount: 1 }
+							}
+						);
+
+						// Attempt to process the reward again
+						await this.handleGameEnd(gameSession as any);
+
+						// If successful, mark as resolved
+						await db.collection('failedblockchaintransactions').updateOne(
+							{ _id: failedTx._id },
+							{
+								$set: {
+									status: 'resolved',
+									resolvedAt: new Date()
+								}
+							}
+						);
+
+						console.log(`Successfully retried reward for user ${failedTx.userId}`);
+					} else {
+						// Game session not found, mark as abandoned
+						await db.collection('failedblockchaintransactions').updateOne(
+							{ _id: failedTx._id },
+							{ $set: { status: 'abandoned' } }
+						);
 					}
-					}
-				);
+
+					// Small delay between retries to avoid overwhelming the system
+					await new Promise(resolve => setTimeout(resolve, 1000));
+
+				} catch (retryError) {
+					const errorMessage = retryError instanceof Error ? retryError.message : 'Unknown error';
+					console.error(`Retry failed for transaction ${failedTx._id}:`, errorMessage);
+
+					// Update error information
+					await db.collection('failedblockchaintransactions').updateOne(
+						{ _id: failedTx._id },
+						{
+							$set: {
+								error: errorMessage,
+								lastAttemptAt: new Date(),
+								status: failedTx.retryCount >= 2 ? 'abandoned' : 'pending'
+							}
+						}
+					);
+				}
 			}
-		}
-		
-		console.log('Failed reward retry process completed');
-		
+
+			console.log('Failed reward retry process completed');
+
 		} catch (error) {
-		console.error('Error in retry failed rewards process:', error);
+			console.error('Error in retry failed rewards process:', error);
 		}
 	}
 
@@ -307,10 +489,61 @@ export class GameRewardHandler {
 		totalGameCoinsIssued: string;
 	}> {
 		try {
-		const db = mongoose.connection.db;
+			const db = mongoose.connection.db;
 
-		if(!db) {
-			console.error('MongoDB connection not available for sync');
+			if (!db) {
+				console.error('MongoDB connection not available for sync');
+				return {
+					totalPlayers: 0,
+					totalRewards: 0,
+					pendingRewards: 0,
+					failedTransactions: 0,
+					totalGameCoinsIssued: '0'
+				};
+			}
+
+			const [
+				totalPlayers,
+				totalRewards,
+				pendingRewards,
+				failedTransactions,
+				allRewards
+			] = await Promise.all([
+				// Count total players with balances
+				db.collection('playerbalances').countDocuments({}),
+
+				// Count total rewards issued
+				GameReward.countDocuments({}),
+
+				// Count pending rewards (not yet confirmed on blockchain)
+				GameReward.countDocuments({ confirmed: false }),
+
+				// Count failed transactions
+				db.collection('failedblockchaintransactions').countDocuments({
+					status: { $in: ['pending', 'retrying'] }
+				}),
+
+				// Get all rewards to calculate total GameCoins issued
+				GameReward.find({ confirmed: true }).select('rewardAmount').lean()
+			]);
+
+			// Calculate total GameCoins issued
+			const totalGameCoinsWei = allRewards.reduce((sum, reward) => {
+				return sum + BigInt(reward.rewardAmount);
+			}, BigInt(0));
+
+			const totalGameCoinsIssued = Web3.utils.fromWei(totalGameCoinsWei.toString(), 'ether');
+
+			return {
+				totalPlayers,
+				totalRewards,
+				pendingRewards,
+				failedTransactions,
+				totalGameCoinsIssued
+			};
+
+		} catch (error) {
+			console.error('Error fetching sync status:', error);
 			return {
 				totalPlayers: 0,
 				totalRewards: 0,
@@ -318,57 +551,6 @@ export class GameRewardHandler {
 				failedTransactions: 0,
 				totalGameCoinsIssued: '0'
 			};
-		}
-		
-		const [
-			totalPlayers,
-			totalRewards,
-			pendingRewards,
-			failedTransactions,
-			allRewards
-		] = await Promise.all([
-			// Count total players with balances
-			db.collection('playerbalances').countDocuments({}),
-			
-			// Count total rewards issued
-			GameReward.countDocuments({}),
-			
-			// Count pending rewards (not yet confirmed on blockchain)
-			GameReward.countDocuments({ confirmed: false }),
-			
-			// Count failed transactions
-			db.collection('failedblockchaintransactions').countDocuments({
-			status: { $in: ['pending', 'retrying'] }
-			}),
-			
-			// Get all rewards to calculate total GameCoins issued
-			GameReward.find({ confirmed: true }).select('rewardAmount').lean()
-		]);
-		
-		// Calculate total GameCoins issued
-		const totalGameCoinsWei = allRewards.reduce((sum, reward) => {
-			return sum + BigInt(reward.rewardAmount);
-		}, BigInt(0));
-		
-		const totalGameCoinsIssued = Web3.utils.fromWei(totalGameCoinsWei.toString(), 'ether');
-		
-		return {
-			totalPlayers,
-			totalRewards,
-			pendingRewards,
-			failedTransactions,
-			totalGameCoinsIssued
-		};
-		
-		} catch (error) {
-		console.error('Error fetching sync status:', error);
-		return {
-			totalPlayers: 0,
-			totalRewards: 0,
-			pendingRewards: 0,
-			failedTransactions: 0,
-			totalGameCoinsIssued: '0'
-		};
 		}
 	}
 }

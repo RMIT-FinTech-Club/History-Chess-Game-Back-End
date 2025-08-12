@@ -31,19 +31,35 @@ export class WalletController {
 	}
 
 	// Get user's wallet balance - /api/wallet/balance/:userId
-	async getWalletBalance(request: WalletBalanceRequest, reply: FastifyReply){
+	async getWalletBalance(request: WalletBalanceRequest, reply: FastifyReply) {
 		try {
+			console.log(`[WalletController] getWalletBalance called for user: ${request.params.userId}`);
+
 			const { userId } = request.params;
 
-			// Verify that the user is accessing their own wallet
-			if((request as any).user.id !== userId) {
-				return reply.status(403).send({
+			const authenticatedUser = request.authUser;
+
+			if(!authenticatedUser) {
+				return reply.status(401).send({
 					success: false,
-					error: 'Access denied: This wallet does NOT belong to this user.'
+					error: 'Authentication required'
 				});
 			}
 
+
+			if(authenticatedUser.id !== userId) {
+				console.log(`[WalletController] Access denied: ${authenticatedUser.id} trying to access ${userId}'s data`);
+				return reply.status(403).send({
+					success: false,
+					error: 'Access denied: You can only access your own wallet'
+				});
+			}
+
+			console.log(`[WalletController] Authorization passed, calling GameRewardHandler...`);
+
 			const balanceData = await GameRewardHandler.getPlayerGameCoinBalance(userId);
+
+			console.log(`[WalletController] Balance data received:`, balanceData);
 
 			return reply.status(200).send({
 				success: true,
@@ -52,13 +68,14 @@ export class WalletController {
 					...balanceData
 				}
 			});
-		
-		} catch(error) {
-			this.fastify.log.error('Error fetching wallet balance: ', error);
+
+		} catch (error) {
+			console.error('[WalletController] Error in getWalletBalance:', error);
+			console.error('[WalletController] Error stack:', error instanceof Error ? error.stack : 'No stack trace');
 
 			return reply.status(500).send({
 				success: false,
-				error: 'Failed to fetch wallet balance.'
+				error: `Failed to fetch wallet balance: ${error instanceof Error ? error.message : 'Unknown error'}`
 			});
 		}
 
@@ -71,7 +88,7 @@ export class WalletController {
 			const { userId } = request.params;
 
 			// Check authorization
-			if((request as any).user.id !== userId) {
+			if ((request as any).user.id !== userId) {
 				return reply.status(403).send({
 					success: false,
 					error: 'Access denied: this wallet does NOT belong to the user.'
@@ -92,7 +109,7 @@ export class WalletController {
 					lastActivity: balanceData.lastUpdated
 				}
 			});
-		} catch(error) {
+		} catch (error) {
 			this.fastify.log.error('Error fetching wallet status: ', error);
 
 			return reply.status(500).send({
