@@ -17,6 +17,7 @@ export interface IGameReward extends Document {
 	gameEndTime: Date; 
 	rewardSentAt?: Date; // when transaction was initiated
 	confirmedAt?: Date; // when transaction was confirmed
+	deletedAt?: Date;
 }
 
 const GameRewardSchema = new Schema<IGameReward>({
@@ -61,13 +62,14 @@ const GameRewardSchema = new Schema<IGameReward>({
 		index: true
 	},
 	rewardSentAt: { type: Date },
-	confirmedAt: { type: Date }
+	confirmedAt: { type: Date },
+	deletedAt: { type: Date }
 });
 
-// Compound indexes
 GameRewardSchema.index({ winnerId: 1, gameEndTime: -1 });
 GameRewardSchema.index({ confirmed: 1, rewardSentAt: 1 });
 GameRewardSchema.index({ matchType: 1, gameEndTime: -1 });
 GameRewardSchema.index({ gameSessionId: 1 }, { unique: true }); // one reward per game session
+GameRewardSchema.index({ deletedAt: 1});
 
-export const GameReward = mongoose.model<IGameReward>('GameReward', GameRewardSchema); // the gamerewards collection
+export const GameReward = mongoose.model<IGameReward>('GameReward', GameRewardSchema);

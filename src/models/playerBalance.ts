@@ -1,17 +1,18 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IPlayerBalance extends Document {
-	userId: string;
-	walletAddress: string;
+	userId: string; // References postgres user.id
 	balance: string;
 	pendingBalance: string;
 	version: number; 
 	lastUpdated: Date;
 	lastSyncedBlock: number;
 	pendingTransactions: IPendingTransaction[];
+	rewardIds: mongoose.Types.ObjectId[]; // References GameReward._id
 	needsSync: boolean;
 	syncError?: string // Last sync error if any
 	corrections?: IBalanceCorrection[];
+	deletedAt?: Date; 
 }
 
 export interface IPendingTransaction {
@@ -55,27 +56,32 @@ const PlayerBalanceSchema = new Schema<IPlayerBalance>({
 		type: String,
 		required: true,
 		unique: true,
-		index: true // this is a primary looup by userId for the UI
+		index: true
 	},
-	walletAddress: {
-		type: String,
-		required: true,
-		unique: true,
-		index: true // this is a lookup by wallet for blockchain events
-	}, 
 	balance: { type: String, default: '0' },
 	pendingBalance: { type: String, default: '0' },
+	version: { type: Number, default: 0 },
 	lastUpdated: { type: Date, default: Date.now, index: true },
 	lastSyncedBlock: { type: Number, default: 0 },
 	pendingTransactions: [PendingTransactionSchema],
+	rewardIds: [{
+		type: Schema.Types.ObjectId,
+		ref: 'GameReward'
+	}],
 	needsSync: { type: Boolean, default: false, index: true},
 	syncError: { type: String },
-	corrections: [BalanceCorrectionSchema]
+	corrections: [BalanceCorrectionSchema],
+	deletedAt: { type: Date }
 });
 
-// Indexes for fast queries
-PlayerBalanceSchema.index({ walletAddress: 1, version: 1 }); 
-PlayerBalanceSchema.index({ needsSync: 1, lastUpdated: 1 })
+PlayerBalanceSchema.pre('save', function(next) {
+	this.version += 1;
+	this.lastUpdated = new Date();
+	next();
+});
+
+PlayerBalanceSchema.index({ userId: 1, version: 1 });
+PlayerBalanceSchema.index({ needsSync: 1, lastUpdated: 1 });
 PlayerBalanceSchema.index({ balance: -1 });
 PlayerBalanceSchema.index({ lastUpdated: 1, needsSync: 1 });
 
