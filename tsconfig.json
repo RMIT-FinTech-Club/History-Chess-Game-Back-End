@@ -17,7 +17,8 @@
       ] // Help resolve relative paths
     },
     "allowImportingTsExtensions": true,
-    "noEmit": true
+    "noEmit": true,
+    "resolveJsonModule": true,
   },
   "include": [
     "src/**/*",

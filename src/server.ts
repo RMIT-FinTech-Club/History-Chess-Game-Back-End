@@ -10,12 +10,14 @@ import neonPlugin from './plugins/neon';
 import mongodbPlugin from './plugins/mongodb';
 import websocketPlugin from './plugins/websocket';
 import prismaPlugin from './plugins/prisma';
+import blockchainPlugin from 'plugins/blockchain.ts';
 import userRoutes from './routes/user.routes';
 import gameRoutes from './routes/game.routes';
 //import * as GameController from './controllers/game.controller';
 //import * as GameService from './services/game.service';
 import { PrismaClient } from '@prisma/client';
 import basePath from './types/pathConfig.ts';
+import marketplaceRoutes from 'routes/marketplace.routes.ts';
 
 dotenv.config();
 
@@ -109,11 +111,13 @@ server.register(mongodbPlugin)
 server.register(neonPlugin)
 server.register(websocketPlugin)
 server.register(prismaPlugin)
+server.register(blockchainPlugin)
 // server.register(gameRoutes)
 
 //Register Routes
 server.register(userRoutes);
 server.register(gameRoutes, { prefix: '/game' })
+server.register(marketplaceRoutes, { prefix: '/marketplace' })
 
 server.ready(() => {
 
