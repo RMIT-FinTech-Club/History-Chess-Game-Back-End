@@ -23,7 +23,7 @@
     "src/**/*",
     "server.ts",
     "src/prisma/**/*"
-  ],
+, "migrations"  ],
   "exclude": [
     "node_modules",
     "dist"
