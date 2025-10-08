@@ -98,7 +98,7 @@ async function inspectMongoDB(): Promise<void> {
         console.log(`   Recent PlayerBalances (last ${Math.min(10, recentBalances.length)}):`);
         recentBalances.forEach((balance, index) => {
           console.log(`   ${index + 1}. User: ${balance.userId}`);
-          console.log(`      Wallet: ${balance.walletAddress || 'Not set'}`);
+        //   console.log(`      Wallet: ${balance.walletAddress || 'Not set'}`);
           console.log(`      Confirmed: ${balance.balance} wei`);
           console.log(`      Pending: ${balance.pendingBalance} wei`);
           console.log(`      Pending TXs: ${balance.pendingTransactions?.length || 0}`);
