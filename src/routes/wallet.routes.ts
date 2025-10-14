@@ -2,33 +2,56 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { WalletController } from '../controllers/wallet.controller.ts';
 import {
 	getWalletBalanceSchema,
-	getWalletStatusSchema
+	getWalletStatusSchema,
+	getWalletHistorySchema,
+	getPendingTransactionsSchema
 } from './schemas/walletSchema.ts';
 import { authenticate } from '../middleware/auth.ts';
-
-// Define request interfaces
-interface WalletParams {
-	Params: { userId: string };
-}
 
 export default async function walletRoutes(fastify: FastifyInstance) {
 	const walletController = new WalletController(fastify);
 
-	// /wallet/balance/:userId
-	fastify.get('/wallet/balance/:userId', {
+	/**
+	 * WALLET BALANCE ENDPOINT
+	 */
+	fastify.get('/wallet/balance', {
 		schema: getWalletBalanceSchema,
 		preHandler: [authenticate],
-		handler: async (request: FastifyRequest<WalletParams>, reply: FastifyReply) => {
+		handler: async (request: FastifyRequest, reply: FastifyReply) => {
 			return walletController.getWalletBalance(request, reply);
 		},
 	});
 
-	// /wallet/status/:userId
-	fastify.get('/wallet/status/:userId', {
+	/**
+	 * WALLET STATUS ENDPOINT
+	 */
+	fastify.get('/wallet/status', {
 		schema: getWalletStatusSchema,
 		preHandler: [authenticate],
-		handler: async (request: FastifyRequest<WalletParams>, reply: FastifyReply) => {
+		handler: async (request: FastifyRequest, reply: FastifyReply) => {
 			return walletController.getWalletStatus(request, reply);
+		}
+	});
+
+	/**
+	 * WALLET HISTORY ENDPOINT
+	 */
+	fastify.get('/wallet/history', {
+		schema: getWalletHistorySchema,
+		preHandler: [authenticate],
+		handler: async (request: FastifyRequest, reply: FastifyReply) => {
+			return walletController.getWalletHistory(request, reply);
+		}
+	});
+
+	/**
+	 * PENDING TRANSACTIONS ENDPOINT
+	 */
+	fastify.get('/wallet/pending', {
+		schema: getPendingTransactionsSchema,
+		preHandler: [authenticate],
+		handler: async (request: FastifyRequest, reply: FastifyReply) => {
+			return walletController.getPendingTransactions(request, reply);
 		}
 	});
 }

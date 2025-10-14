@@ -38,9 +38,10 @@ async function testPublishMessage(): Promise<void> {
     console.log('   ✅ RabbitMQ connected');
 
     // Step 3: Get test user (the one with wallet address)
+	const TEST_USER_EMAIL = process.env.TEST_USER_EMAIL
     console.log('\n STEP 3: Finding test user...');
     const testUser = await postgresPrisma.users.findUnique({
-      where: { email: 'chaunguyenwork01@gmail.com' }
+      where: { email: TEST_USER_EMAIL }
     });
 
     if (!testUser) {

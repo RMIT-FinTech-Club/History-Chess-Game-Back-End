@@ -4,9 +4,6 @@ import { PlayerBalance } from '../models/playerBalance.ts';
 import { GameReward } from '../models/gameRewards.ts';
 import mongoose from 'mongoose';
 
-// TODO: Create these mongoose models for blockchain metadata later
-// The below interfaces are just temporary 
-
 interface IBlockchainEventLog {
 	contractAddress: string;
 	eventName: string;

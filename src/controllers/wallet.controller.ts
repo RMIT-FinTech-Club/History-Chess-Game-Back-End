@@ -2,24 +2,12 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { GameRewardHandler } from '../services/gameRewardHandler';
 
 interface WalletBalanceRequest extends FastifyRequest {
-	params: {
-		userId: string;
-	};
+	// userId will come from authUser
 }
 
-// interface WalletHistoryRequest extends FastifyRequest {
-// 	params: {
-// 		userId: string;
-// 	};
-// 	query: {
-// 		limit?: number;
-// 		offset?: number;
-// 	};
-// }
-
-interface WalletStatsRequest extends FastifyRequest {
-	params: {
-		userId: string;
+interface WalletHistoryRequest extends FastifyRequest {
+	query: {
+		limit?: number;
 	};
 }
 
@@ -30,70 +18,71 @@ export class WalletController {
 		this.fastify = fastify;
 	}
 
-	// Get user's wallet balance - /api/wallet/balance/:userId
+	/**
+	 * GET /wallet/balance
+	 * @param request 
+	 * @param reply 
+	 * @returns 
+	 */
 	async getWalletBalance(request: WalletBalanceRequest, reply: FastifyReply) {
 		try {
-			console.log(`[WalletController] getWalletBalance called for user: ${request.params.userId}`);
-
-			const { userId } = request.params;
-
-			const authenticatedUser = request.authUser;
-
-			if(!authenticatedUser) {
+			// Get userId from JWT token
+			if (!request.authUser) {
 				return reply.status(401).send({
 					success: false,
 					error: 'Authentication required'
 				});
 			}
 
+			const userId = request.authUser.id;
+			const username = request.authUser.username;
 
-			if(authenticatedUser.id !== userId) {
-				console.log(`[WalletController] Access denied: ${authenticatedUser.id} trying to access ${userId}'s data`);
-				return reply.status(403).send({
-					success: false,
-					error: 'Access denied: You can only access your own wallet'
-				});
-			}
-
-			console.log(`[WalletController] Authorization passed, calling GameRewardHandler...`);
+			console.log(`[WalletController] getWalletBalance`);
+			console.log(`	User: ${username} (${userId})`);
 
 			const balanceData = await GameRewardHandler.getPlayerGameCoinBalance(userId);
 
-			console.log(`[WalletController] Balance data received:`, balanceData);
+			console.log(`[WalletController] Balance fetched successfully`);
 
 			return reply.status(200).send({
 				success: true,
 				data: {
 					userId,
+					username,
 					...balanceData
 				}
 			});
 
 		} catch (error) {
 			console.error('[WalletController] Error in getWalletBalance:', error);
-			console.error('[WalletController] Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+
+			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
 			return reply.status(500).send({
 				success: false,
-				error: `Failed to fetch wallet balance: ${error instanceof Error ? error.message : 'Unknown error'}`
+				error: `Failed to fetch wallet balance: ${errorMessage}`
 			});
 		}
 
-
 	}
 
-	// Get wallet status - /api/wallet/status/:userId
+	/**
+	 * GET /wallet/status
+	 */
 	async getWalletStatus(request: WalletBalanceRequest, reply: FastifyReply) {
 		try {
-			const { userId } = request.params;
 
-			// Check authorization
-			if ((request as any).user.id !== userId) {
-				return reply.status(403).send({
+			if (!request.authUser) {
+				return reply.status(401).send({
 					success: false,
-					error: 'Access denied: this wallet does NOT belong to the user.'
+					error: 'Authentication required'
 				});
 			}
+
+			const userId = request.authUser.id;
+			const username = request.authUser.username;
+			console.log(`\n[WalletController] getWalletStatus`);
+			console.log(`	User: ${username} (${userId})`);
 
 			const balanceData = await GameRewardHandler.getPlayerGameCoinBalance(userId);
 			const hasPendingRewards = parseFloat(balanceData.pendingGameCoins) > 0;
@@ -110,12 +99,110 @@ export class WalletController {
 				}
 			});
 		} catch (error) {
-			this.fastify.log.error('Error fetching wallet status: ', error);
+			console.error("[WalletController] Error in getWalletStatus:", error);
+
+			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
 			return reply.status(500).send({
 				success: false,
-				error: 'Failed to fetch wallet status'
-			})
+				error: `Failed to fetch wallet status: ${errorMessage}`
+			});
+		}
+	}
+
+	/**
+	 * GET /wallet/history
+	 */
+	async getWalletHistory(request: WalletHistoryRequest, reply: FastifyReply) {
+		try {
+			if (!request.authUser) {
+				return reply.status(401).send({
+					success: false,
+					error: 'Authentication required'
+				});
+			}
+
+			const userId = request.authUser.id;
+			const username = request.authUser.username;
+
+			const limit = Math.min(
+				Math.max(request.query.limit || 10, 1), // Min 1
+				20 // Max 20
+			);
+
+			console.log(`\n[WalletController] getWalletHistory`);
+			console.log(`	User: ${username} (${userId})`);
+			console.log(`	Limit: ${limit}`);
+
+			const rewards = await GameRewardHandler.getPlayerRewardHistory(userId, limit);
+
+			console.log(`[WalletController] Found ${rewards.length} rewards`);
+
+			return reply.status(200).send({
+				success: true,
+				data: {
+					userId,
+					username,
+					totalRewards: rewards.length,
+					rewards,
+					pagination: {
+						limit,
+						hasMore: rewards.length === limit
+					}
+				}
+			});
+		} catch (error) {
+			console.error('[WalletController] Error in getWalletHistory:', error);
+
+			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+			return reply.status(500).send({
+				success: false,
+				error: `Failed to fetch wallet history: ${errorMessage}`
+			});
+		}
+	}
+
+	/**
+	 * GET /wallet/pending
+	 */
+	async getPendingTransactions(request: WalletBalanceRequest, reply: FastifyReply) {
+		try {
+			if (!request.authUser) {
+				return reply.status(401).send({
+					success: false,
+					error: 'Authentication required'
+				});
+
+			}
+
+			const userId = request.authUser.id;
+			const username = request.authUser.username;
+
+			console.log(`\n[WalletController] getPendingTransactions`);
+			console.log(`	User: ${username} (${userId})`);
+
+			const pendingData = await GameRewardHandler.getPendingTransactions(userId);
+
+			console.log(`[WalletController] Found ${pendingData.pendingTransactions.length} pending transactions`);
+
+			return reply.status(200).send({
+				success: true,
+				data: {
+					userId,
+					username,
+					...pendingData
+				}
+			});
+		} catch (error) {
+			console.error('[WalletController] Error in getPendingTransactions:', error);
+
+			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+			return reply.status(500).send({
+				success: false,
+				error: `Failed to fetch pending transactions: ${errorMessage}`
+			});
 		}
 	}
 
