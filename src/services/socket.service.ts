@@ -7,9 +7,18 @@ import { InMemoryGameSession } from "../types/game.types";
 import { CustomSocket } from "../types/socket.types";
 import * as GameService from "./game.service";
 import { saveMove } from "./game.service";
-//simport { StockfishService } from "./stockfish.service";
+import amqplib from "amqplib";
+import Web3 from "web3";
+import * as fs from "fs";
+import * as path from "path";
+import { fileURLToPath } from "url";
+import { getChannel } from "../utils/rabbitmq";
+import { mongoPrisma } from "../configs/mongoPrismaClient";
+import { PrismaClient } from "@prisma/client";
 
-let onlineUsersInterval: NodeJS.Timeout | null = null;
+const prisma = new PrismaClient();
+
+//simport { StockfishService } from "./stockfish.service";
 
 export const gameSessions = new Map<string, InMemoryGameSession>();
 const onlineUsers = new Map<
@@ -17,6 +26,433 @@ const onlineUsers = new Map<
   { userId: string; socketId: string; lastSeen: Date }
 >();
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const web3 = new Web3("http://127.0.0.1:7545");
+
+const NFTMarketplaceArtifact = JSON.parse(
+  fs.readFileSync(
+    path.join(
+      __dirname,
+      "../blockchain/truffle/build/contracts/NFTMarketplace.json"
+    ),
+    "utf8"
+  )
+);
+
+const NFTMarketplaceContract = new web3.eth.Contract(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  NFTMarketplaceArtifact.abi as any,
+  process.env.NFTMarketplaceContract_Contract_Address as string
+);
+
+export async function createListing(io: SocketIOServer) {
+  const ch = await getChannel();
+  if (!ch) throw new Error("Failed to get channel");
+
+  const QUEUE = "marketplace.create";
+  await ch.prefetch(1); // One message at a time
+  console.log("[create-worker] waiting for messages on", QUEUE);
+
+  ch.consume(
+    QUEUE,
+    async (msg: amqplib.ConsumeMessage | null) => {
+      if (!msg) return;
+
+      const payload = JSON.parse(msg.content.toString());
+      const { listingId, tokenId, price, sellerAddress, nftContractAddress } =
+        payload;
+
+      const maxRetries = 3;
+      let attempt = 0;
+      let success = false;
+
+      while (attempt < maxRetries && !success) {
+        attempt++;
+        console.log(`[create-worker][attempt ${attempt}] Starting transaction`);
+
+        try {
+          const tx = NFTMarketplaceContract.methods.createListing(
+            nftContractAddress,
+            tokenId,
+            price
+          );
+
+          const sendObj = { from: sellerAddress, gas: "200000" };
+          console.log("[create-worker] Sending tx with params:", sendObj);
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          let txHashUpdatePromise: Promise<any> | null = null;
+          const sendPromise = tx
+            .send(sendObj)
+            .on("transactionHash", async (txHash: string) => {
+              console.log("[create-worker] Transaction hash received:", txHash);
+              txHashUpdatePromise = mongoPrisma.nFTMarketplaceListing.update({
+                where: { id: listingId },
+                data: {
+                  createTxHash: txHash,
+                  status: "CREATE_IN_NETWORK",
+                },
+              });
+              io.to("marketplaceRoom").emit("listingStatusUpdate", {
+                data: {
+                  listingId,
+                  status: "CREATE_IN_NETWORK",
+                  txHash,
+                },
+              });
+            });
+
+          const receipt = await sendPromise;
+          console.log(
+            "[create-worker] Transaction mined:",
+            receipt.transactionHash
+          );
+
+          if (receipt?.status) {
+            if (txHashUpdatePromise) {
+              await txHashUpdatePromise;
+              console.log(
+                "[create-worker] First update (CREATE_IN_NETWORK) completed"
+              );
+            }
+
+            let onchainId: string | number | null = null;
+            let createTimestamp = null;
+
+            if (receipt.events) {
+              for (const k of Object.keys(receipt.events)) {
+                const ev = receipt.events[k];
+                if (ev?.event === "ListingCreated") {
+                  onchainId =
+                    (ev.returnValues?.listingId as string | number) ??
+                    onchainId;
+                  createTimestamp = ev.returnValues?.createTimestamp;
+                }
+              }
+            }
+
+            const updatedListing =
+              await mongoPrisma.nFTMarketplaceListing.update({
+                where: { id: listingId },
+                data: {
+                  status: "ON_SALE",
+                  nftListingId: onchainId ? String(onchainId) : "",
+                  createBlockNumber: String(receipt.blockNumber ?? ""),
+                  createTimestamp: createTimestamp
+                    ? new Date(Number(createTimestamp) * 1000)
+                    : null,
+                },
+              });
+
+            io.to("marketplaceRoom").emit("listingStatusUpdate", {
+              data: updatedListing,
+            });
+
+            console.log(
+              "[create-worker] successfully updated listing status to ON_SALE"
+            );
+
+            success = true;
+          } else {
+            throw new Error("receipt.status false or missing");
+          }
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Unknown error";
+          console.error(
+            `[create-worker] attempt ${attempt} failed - message: ${message}`
+          );
+          if (attempt >= maxRetries) {
+            const failedListing =
+              await mongoPrisma.nFTMarketplaceListing.update({
+                where: { id: listingId },
+                data: { status: "CREATE_ERROR" },
+              });
+
+            io.to("marketplaceRoom").emit("listingStatusUpdate", {
+              data: failedListing,
+              error: message,
+            });
+          } else {
+            io.to("marketplaceRoom").emit("listingStatusUpdate", {
+              listingId,
+              status: "CREATE_RETRYING",
+              attempt,
+              remaining: maxRetries - attempt,
+              error: message,
+            });
+            await new Promise((r) => setTimeout(r, 2000 * attempt));
+          }
+        }
+      }
+
+      ch.ack(msg);
+      // console.log("[create-worker] Job ACKed for", listingId);
+    },
+    { noAck: false }
+  );
+}
+
+export async function purchaseListing(io: SocketIOServer) {
+  const ch = await getChannel();
+  if (!ch) throw new Error("Failed to get channel");
+
+  const QUEUE = "marketplace.purchase";
+  await ch.prefetch(1);
+  console.log("[purchase-worker] waiting for messages on", QUEUE);
+
+  ch.consume(
+    QUEUE,
+    async (msg: amqplib.ConsumeMessage | null) => {
+      if (!msg) return;
+
+      const payload = JSON.parse(msg.content.toString());
+      const { listingId, nftListingId, price, buyerAddress } = payload;
+
+      const maxRetries = 3;
+      let attempt = 0;
+      let success = false;
+
+      while (attempt < maxRetries && !success) {
+        attempt++;
+        console.log(
+          `[purchase-worker][attempt ${attempt}] Starting transaction`
+        );
+
+        try {
+          const tx =
+            NFTMarketplaceContract.methods.purchaseListing(nftListingId);
+          const sendObj = { from: buyerAddress, value: price, gas: "200000" };
+          console.log("[purchase-worker] Sending tx with params:", sendObj);
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          let txHashUpdatePromise: Promise<any> | null = null;
+          const sendPromise = tx
+            .send(sendObj)
+            .on("transactionHash", async (txHash: string) => {
+              console.log(
+                "[purchase-worker] Transaction hash received:",
+                txHash
+              );
+              txHashUpdatePromise = mongoPrisma.nFTMarketplaceListing.update({
+                where: { id: listingId },
+                data: { purchaseTxHash: txHash, status: "PURCHASE_IN_NETWORK" },
+              });
+              io.to("marketplaceRoom").emit("listingStatusUpdate", {
+                data: { listingId, status: "PURCHASE_IN_NETWORK", txHash },
+              });
+            });
+
+          const receipt = await sendPromise;
+          console.log(
+            "[purchase-worker] Transaction mined:",
+            receipt.transactionHash
+          );
+
+          if (receipt?.status) {
+            if (txHashUpdatePromise) await txHashUpdatePromise;
+
+            let purchaseTimestamp = null;
+            if (receipt.events) {
+              for (const k of Object.keys(receipt.events)) {
+                const ev = receipt.events[k];
+                if (ev?.event === "ListingPurchased") {
+                  purchaseTimestamp = ev.returnValues?.purchaseTimestamp;
+                }
+              }
+            }
+
+            const updatedListing =
+              await mongoPrisma.nFTMarketplaceListing.update({
+                where: { id: listingId },
+                data: {
+                  status: "PURCHASED",
+                  purchaseBlockNumber: String(receipt.blockNumber ?? ""),
+                  purchaseTimestamp: purchaseTimestamp
+                    ? new Date(Number(purchaseTimestamp) * 1000)
+                    : null,
+                },
+              });
+
+            const buyer = await prisma.users.findUnique({
+              where: { walletAddress: buyerAddress },
+            });
+            if (buyer)
+              await prisma.nfts.update({
+                where: { tokenId: updatedListing.tokenId },
+                data: { ownerId: buyer.id },
+              });
+            else {
+              throw new Error("Buyer does not exist in db");
+            }
+
+            io.to("marketplaceRoom").emit("listingStatusUpdate", {
+              data: updatedListing,
+            });
+            console.log(
+              "[purchase-worker] successfully updated listing status to PURCHASED"
+            );
+            success = true;
+          } else throw new Error("receipt.status false or missing");
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Unknown error";
+          console.error(
+            `[purchase-worker] attempt ${attempt} failed - message: ${message}`
+          );
+
+          if (attempt >= maxRetries) {
+            const failedListing =
+              await mongoPrisma.nFTMarketplaceListing.update({
+                where: { id: listingId },
+                data: { status: "PURCHASE_ERROR" },
+              });
+            io.to("marketplaceRoom").emit("listingStatusUpdate", {
+              data: failedListing,
+              error: message,
+            });
+          } else {
+            io.to("marketplaceRoom").emit("listingStatusUpdate", {
+              listingId,
+              status: "PURCHASE_RETRYING",
+              attempt,
+              remaining: maxRetries - attempt,
+              error: message,
+            });
+            await new Promise((r) => setTimeout(r, 2000 * attempt));
+          }
+        }
+      }
+
+      ch.ack(msg);
+      // console.log("[purchase-worker] Job ACKed for", listingId);
+    },
+    { noAck: false }
+  );
+}
+
+export async function cancelListing(io: SocketIOServer) {
+  const ch = await getChannel();
+  if (!ch) throw new Error("Failed to get channel");
+
+  const QUEUE = "marketplace.cancel";
+  await ch.prefetch(1);
+  console.log("[cancel-worker] waiting for messages on", QUEUE);
+
+  ch.consume(
+    QUEUE,
+    async (msg: amqplib.ConsumeMessage | null) => {
+      if (!msg) return;
+
+      const payload = JSON.parse(msg.content.toString());
+      const { listingId, nftListingId, sellerAddress } = payload;
+
+      const maxRetries = 3;
+      let attempt = 0;
+      let success = false;
+
+      while (attempt < maxRetries && !success) {
+        attempt++;
+        console.log(`[cancel-worker][attempt ${attempt}] Starting transaction`);
+
+        try {
+          const tx = NFTMarketplaceContract.methods.cancelListing(nftListingId);
+          const sendObj = { from: sellerAddress, gas: "150000" };
+          console.log("[cancel-worker] Sending tx with params:", sendObj);
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          let txHashUpdatePromise: Promise<any> | null = null;
+          const sendPromise = tx
+            .send(sendObj)
+            .on("transactionHash", async (txHash: string) => {
+              console.log("[cancel-worker] Transaction hash received:", txHash);
+              txHashUpdatePromise = mongoPrisma.nFTMarketplaceListing.update({
+                where: { id: listingId },
+                data: { cancelTxHash: txHash, status: "CANCEL_IN_NETWORK" },
+              });
+              io.to("marketplaceRoom").emit("listingStatusUpdate", {
+                data: {
+                  listingId,
+                  status: "CANCEL_IN_NETWORK",
+                  txHash,
+                },
+              });
+            });
+
+          const receipt = await sendPromise;
+          console.log(
+            "[cancel-worker] Transaction mined:",
+            receipt.transactionHash
+          );
+
+          if (receipt?.status) {
+            if (txHashUpdatePromise) await txHashUpdatePromise;
+
+            let cancelTimestamp = null;
+            if (receipt.events) {
+              for (const k of Object.keys(receipt.events)) {
+                const ev = receipt.events[k];
+                if (ev?.event === "ListingCancelled") {
+                  cancelTimestamp = ev.returnValues?.cancelTimestamp;
+                }
+              }
+            }
+
+            const updatedListing =
+              await mongoPrisma.nFTMarketplaceListing.update({
+                where: { id: listingId },
+                data: {
+                  status: "CANCELLED",
+                  cancelBlockNumber: String(receipt.blockNumber ?? ""),
+                  cancelTimestamp: cancelTimestamp
+                    ? new Date(Number(cancelTimestamp) * 1000)
+                    : null,
+                },
+              });
+
+            io.to("marketplaceRoom").emit("listingStatusUpdate", {
+              data: updatedListing,
+            });
+            console.log(
+              "[cancel-worker] successfully updated listing status to CANCELLED"
+            );
+            success = true;
+          } else throw new Error("receipt.status false or missing");
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : "Unknown error";
+          console.error(
+            `[cancel-worker] attempt ${attempt} failed - message: ${message}`
+          );
+
+          if (attempt >= maxRetries) {
+            const failedListing =
+              await mongoPrisma.nFTMarketplaceListing.update({
+                where: { id: listingId },
+                data: { status: "CANCEL_ERROR" },
+              });
+            io.to("marketplaceRoom").emit("listingStatusUpdate", {
+              data: failedListing,
+              error: message,
+            });
+          } else {
+            io.to("marketplaceRoom").emit("listingStatusUpdate", {
+              listingId,
+              status: "CANCEL_RETRYING",
+              attempt,
+              remaining: maxRetries - attempt,
+              error: message,
+            });
+            await new Promise((r) => setTimeout(r, 2000 * attempt));
+          }
+        }
+      }
+
+      ch.ack(msg);
+      // console.log("[cancel-worker] Job ACKed for", listingId);
+    },
+    { noAck: false }
+  );
+}
 const startTimer = (
   session: InMemoryGameSession,
   io: SocketIOServer,
@@ -329,66 +765,16 @@ export const handleSocketConnection = async (
       "onlineUsers",
       Array.from(onlineUsers.values()).map((u) => u.userId)
     );
-
-    io.to("leaderboardRoom").emit(
-      "leaderboardOnlineUsers",
-      Array.from(onlineUsers.values()).map((u) => u.userId)
-    );
   });
 
-  socket.on("joinLeaderboardRoom", () => {
-    if (!socket.data.userId) {
-      socket.emit("error", {
-        message: "Must identify before joining leaderboard",
-      });
-      fastify.log.warn(
-        `Socket ${socket.id} attempted to join leaderboardRoom without userId`
-      );
-      return;
-    }
-    socket.join("leaderboardRoom");
-
-    const users = Array.from(onlineUsers.values()).map((u) => u.userId);
-    socket.emit("leaderboardOnlineUsers", users);
-
-    const roomSize = io.sockets.adapter.rooms.get("leaderboardRoom")?.size || 0;
-    fastify.log.info(
-      `Client ${socket.id} (user ${socket.data.userId}) joined leaderboardRoom. Room size: ${roomSize}`
-    );
-
-    if (!onlineUsersInterval) {
-      onlineUsersInterval = setInterval(() => {
-        const roomSize =
-          io.sockets.adapter.rooms.get("leaderboardRoom")?.size || 0;
-        if (roomSize > 0) {
-          const users = Array.from(onlineUsers.values()).map((u) => u.userId);
-          io.to("leaderboardRoom").emit("leaderboardOnlineUsers", users);
-          fastify.log.info(
-            `Emitted leaderboardOnlineUsers to ${roomSize} clients: ${users.length} users`
-          );
-        } else if (onlineUsersInterval) {
-          clearInterval(onlineUsersInterval);
-          onlineUsersInterval = null;
-          fastify.log.info(
-            "Cleared onlineUsersInterval due to empty leaderboardRoom"
-          );
-        }
-      }, 5000);
-    }
+  socket.on("joinMarketplace", () => {
+    socket.join("marketplaceRoom");
+    console.log(`[socket] User ${socket.id} joined marketplaceRoom`);
   });
 
-  socket.on("leaveLeaderboardRoom", () => {
-    socket.leave("leaderboardRoom");
-
-    const roomSize = io.sockets.adapter.rooms.get("leaderboardRoom")?.size || 0;
-    fastify.log.info(
-      `Client ${socket.id} left leaderboardRoom. Room size: ${roomSize}`
-    );
-
-    io.to("leaderboardRoom").emit(
-      "leaderboardOnlineUsers",
-      Array.from(onlineUsers.values()).map((u) => u.userId)
-    );
+  socket.on("leaveMarketplace", () => {
+    socket.leave("marketplaceRoom");
+    console.log(`[socket] User ${socket.id} left marketplaceRoom`);
   });
 
   // Handle game challenge
@@ -640,19 +1026,10 @@ export const handleSocketConnection = async (
     if (onlineUsers.has(socket.id)) {
       const userId = onlineUsers.get(socket.id)!.userId;
       onlineUsers.delete(socket.id);
-      io.to("leaderboardRoom").emit(
-        "leaderboardOnlineUsers",
-        Array.from(onlineUsers.values()).map((u) => u.userId)
-      );
       fastify.log.info(
         `User ${userId} disconnected, online users: ${onlineUsers.size}`
       );
     }
-
-    const roomSize = io.sockets.adapter.rooms.get("leaderboardRoom")?.size || 0;
-    fastify.log.info(
-      `Client ${socket.id} disconnected. Leaderboard room size: ${roomSize}`
-    );
 
     const gameId = socket.data?.gameId;
     const userId = socket.data?.userId;
