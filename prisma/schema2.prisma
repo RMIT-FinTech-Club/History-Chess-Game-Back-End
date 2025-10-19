@@ -1,4 +1,5 @@
 generator client {
+     output   = "../generated/client"
      provider = "prisma-client-js"
  }
  
@@ -88,6 +89,44 @@ generator client {
      CANCELLED
      EXPIRED
  }
+
+ enum NFTMarketplaceListingStatus {
+  CREATE_PENDING
+  CREATE_IN_NETWORK
+  ON_SALE
+  CREATE_ERROR
+  PURCHASE_PENDING
+  PURCHASE_IN_NETWORK
+  PURCHASED
+  PURCHASE_ERROR
+  CANCEL_PENDING
+  CANCEL_IN_NETWORK
+  CANCELLED
+  CANCEL_ERROR
+}
+
+model NFTMarketplaceListing {
+  id                        String        @id @default(auto()) @map("_id") @db.ObjectId
+  nftListingId              String        @unique // On-chain listing ID
+  nftContractAddress        String
+  tokenId                   String
+  price                     String        
+  status                    NFTMarketplaceListingStatus
+  sellerAddress             String
+  buyerAddress              String?       
+  
+  createTimestamp           DateTime?
+  purchaseTimestamp         DateTime?
+  cancelTimestamp           DateTime?
+  
+  createTxHash              String?       
+  purchaseTxHash            String?     
+  cancelTxHash              String?     
+  
+  createBlockNumber         String?
+  purchaseBlockNumber       String?
+  cancelBlockNumber         String?
+}
  
  model GameHistory {
      id            String     @id @default(auto()) @map("_id") @db.ObjectId
