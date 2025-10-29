@@ -9,6 +9,7 @@ import * as crypto from 'crypto';
 import basePath from '../types/pathConfig';
 import { PlayerBalance } from 'models/playerBalance';
 import Web3 from 'web3';
+import { BlockchainService } from './blockchain.service';
 
 const prisma = new PrismaClient();
 const web3 = new Web3();
@@ -63,6 +64,7 @@ export class UserService {
 	private resetCodes: Map<string, ResetCodeEntry>;
 	private logger: FastifyInstance['log'];
 	private googleClient: OAuth2Client;
+	private blockchainService: BlockchainService;
 
 	constructor(fastify: FastifyInstance) {
 		this.jwtSecret = process.env.JWT_SECRET || 'your-secret-key';
@@ -84,6 +86,7 @@ export class UserService {
 			process.env.GOOGLE_CLIENT_SECRET,
 			`${basePath}/users/google-callback`
 		);
+		this.blockchainService = new BlockchainService();
 	}
 
 	private validateUsername(username: string): string {
@@ -158,14 +161,14 @@ export class UserService {
 	}
 
 	private validateWalletAddress(address?: string): string | null {
-		if(!address) {
+		if (!address) {
 			return null;
 		}
-		if(typeof address !== 'string') {
+		if (typeof address !== 'string') {
 			throw new Error('Wallet address must be a string');
 		}
 		const trimmed = validator.trim(address);
-		if(!web3.utils.isAddress(trimmed)) {
+		if (!web3.utils.isAddress(trimmed)) {
 			throw new Error('Invalid Ethereum wallet address');
 		}
 		return web3.utils.toChecksumAddress(trimmed);
@@ -196,7 +199,6 @@ export class UserService {
 			const cleanUsername = this.validateUsername(data.username);
 			const cleanEmail = this.validateEmail(data.email);
 			const cleanPassword = this.validatePassword(data.password);
-			const cleanWallet = this.validateWalletAddress(data.walletAddress);
 
 			const existingUser = await prisma.users.findFirst({
 				where: {
@@ -218,49 +220,56 @@ export class UserService {
 
 			const hashedPassword = await bcrypt.hash(cleanPassword, 10);
 
-			let walletId: string | null = null;
-			let walletAddress: string | null = null;
-			if(walletAddress) {
-				const validAddress = this.validateWalletAddress(walletAddress);
-				const existingWallet = await prisma.wallet.findUnique({
-					where: { address: validAddress }
-				});
-				if(existingWallet) {
-					throw new Error('Wallet address already in use');
+			// Generate a new wallet address
+			const walletAddress = await this.blockchainService.createWallet();
 
-				}
-				const wallet = await prisma.wallet.create({
+			// Start a transaction for Prisma
+			const user = await prisma.$transaction(async (prisma) => {
+				return prisma.users.create({
 					data: {
 						id: crypto.randomUUID(),
-						address: validAddress
-					}
+						username: cleanUsername,
+						email: cleanEmail,
+						hashedPassword,
+						walletAddress, // Save the generated wallet address
+						googleAuth: false,
+					},
 				});
-				walletId = wallet.id;
-				walletAddress = wallet.address;
-			}
-
-			const user = await prisma.users.create({
-				data: {
-					id: crypto.randomUUID(),
-					username: cleanUsername,
-					email: cleanEmail,
-					hashedPassword,
-					walletAddress: cleanWallet, // link to Wallet
-					googleAuth: false,
-				},
 			});
 
-			// Mark mongo player balance for sync if wallet provided
-			if(cleanWallet) {
-				await PlayerBalance.updateOne(
-					{ userId: user.id },
-					{ $set: { needsSync: true }},
-					{ upsert: true }
-				)
+			// Log walletAddress for debugging
+			this.logger.info(`Updating PlayerBalance with walletAddress: ${walletAddress}`);
+
+			// Ensure walletAddress is not null before creating PlayerBalance
+			if (walletAddress) {
+				try {
+					await PlayerBalance.create({
+						userId: user.id,
+						walletAddress: walletAddress.toLowerCase(), // Ensure walletAddress is set
+						needsSync: true,
+					});
+				} catch (mongoError) {
+					this.logger.error(`Failed to create PlayerBalance: ${mongoError.message}`);
+
+					// Rollback Prisma user creation
+					await prisma.users.delete({
+						where: { id: user.id },
+					});
+
+					throw new Error('Failed to create PlayerBalance. User creation rolled back.');
+				}
+			} else {
+				this.logger.error('Generated walletAddress is null. Cannot create PlayerBalance.');
+
+				// Rollback Prisma user creation
+				await prisma.users.delete({
+					where: { id: user.id },
+				});
+
+				throw new Error('Failed to create wallet address. Please try again.');
 			}
 
 			const token = this.generateToken(user.id, user.username, user.googleAuth);
-
 
 			return {
 				token,
@@ -446,8 +455,6 @@ export class UserService {
 			if (data.username) updateData.username = this.validateUsername(data.username);
 			if (data.email) updateData.email = this.validateEmail(data.email);
 			if (data.password) updateData.hashedPassword = await bcrypt.hash(this.validatePassword(data.password), 10);
-			if (data.walletAddress !== undefined) updateData.walletAddress = data.walletAddress;
-
 
 			const updatedUser = await prisma.users.update({
 				where: { id },

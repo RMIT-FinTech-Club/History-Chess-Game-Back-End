@@ -120,21 +120,30 @@ export class BlockchainService {
 
 			console.log(`Reward transaction sent: ${transaction.transactionHash}`);
 
-			// Update the GameReward record with transaction details
-			await GameReward.findByIdAndUpdate(gameReward._id, {
-				transactionHash: transaction.transactionHash,
-				blockNumber: Number(transaction.blockNumber),
-				rewardSentAt: new Date()
-			});
+			try {
+				// Update the GameReward record with transaction details
+				await GameReward.findByIdAndUpdate(gameReward._id, {
+					transactionHash: transaction.transactionHash,
+					blockNumber: Number(transaction.blockNumber),
+					rewardSentAt: new Date()
+				});
 
-			// Update the pending transaction in PlayerBalance with real transaction details
-			await this.updatePendingTransaction(
-				gameReward.winnerId,
-				`pending-${gameReward._id}`,
-				transaction.transactionHash
-			);
+				// Update the pending transaction in PlayerBalance with real transaction details
+				await this.updatePendingTransaction(
+					gameReward.winnerId,
+					`pending-${gameReward._id}`,
+					transaction.transactionHash
+				);
 
-			console.log(`Reward processing completed for ${gameReward.winnerId}`);
+				console.log(`Reward processing completed for ${gameReward.winnerId}`);
+			} catch (mongoError) {
+				console.error('Failed to update MongoDB after blockchain transaction:', mongoError);
+
+				// Log the failed transaction for manual review
+				await this.logFailedTransaction(gameReward, 'MongoDB update failed after blockchain transaction');
+
+				throw new Error('Blockchain transaction succeeded, but MongoDB update failed. Manual intervention required.');
+			}
 
 		} catch (error) {
 			console.error('Error processing blockchain reward: ', error);
@@ -316,14 +325,13 @@ export class BlockchainService {
 		console.log(`Processing MatchWin event: ${player} won ${Web3.utils.fromWei(reward, 'ether')} GameCoins`);
 
 		try {
-			const existingEvent = await this.checkEventProcessed(transactionHash); // check to prevent duplication
+			const existingEvent = await this.checkEventProcessed(transactionHash);
 
 			if (existingEvent) {
-				console.log(`Event ${transactionHash} already processed, skippng`);
+				console.log(`Event ${transactionHash} already processed, skipping`);
 				return;
 			}
 
-			// Log the event 
 			await this.logBlockchainEvent({
 				contractAddress: event.address.toLowerCase(),
 				eventName: 'MatchWin',
@@ -338,40 +346,50 @@ export class BlockchainService {
 				createdAt: new Date()
 			});
 
-			// Update player balance and move from pending to confirmed
-			await this.confirmPlayerReward(
-				player.toLowerCase(),
-				reward.toString(),
-				transactionHash, blockNumber
-			)
+			try {
+				await this.confirmPlayerReward(
+					player.toLowerCase(),
+					reward.toString(),
+					transactionHash,
+					blockNumber
+				);
 
-			await GameReward.updateOne(
-				{ transactionHash },
-				{
-					confirmed: true,
+				await GameReward.updateOne(
+					{ transactionHash },
+					{
+						confirmed: true,
+						blockNumber: parseInt(blockNumber),
+						confirmedAt: new Date()
+					}
+				);
+
+				await this.markEventProcessed(transactionHash);
+			} catch (mongoError) {
+				console.error('Failed to update MongoDB during MatchWin event processing:', mongoError);
+
+				// Log the failure for manual review
+				await this.logBlockchainEvent({
+					contractAddress: event.address.toLowerCase(),
+					eventName: 'MatchWin',
 					blockNumber: parseInt(blockNumber),
-					confirmedAt: new Date()
-				}
-			);
+					transactionHash,
+					logIndex: event.logIndex,
+					playerAddress: player.toLowerCase(),
+					rewardAmount: reward.toString(),
+					matchType,
+					processed: false,
+					error: mongoError.message,
+					retryCount: 0,
+					createdAt: new Date()
+				});
 
-			await this.markEventProcessed(transactionHash);
+				throw new Error('MatchWin event processing failed. Manual intervention required.');
+			}
 
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-			await this.logBlockchainEvent({
-				contractAddress: event.address.toLowerCase(),
-				eventName: 'MatchWin',
-				blockNumber: parseInt(blockNumber),
-				transactionHash,
-				logIndex: event.logIndex,
-				playerAddress: player.toLowerCase(),
-				rewardAmount: reward.toString(),
-				matchType,
-				processed: false,
-				error: errorMessage,
-				retryCount: 0,
-				createdAt: new Date()
-			})
+			console.error('Error processing MatchWin event:', errorMessage);
+			throw error;
 		}
 	}
 
@@ -518,5 +536,16 @@ export class BlockchainService {
 				console.error('Event listener error');
 			});
 
+	}
+
+	async createWallet(): Promise<string> {
+		try {
+			const account = this.web3.eth.accounts.create();
+			console.log(`New wallet created: ${account.address}`);
+			return account.address;
+		} catch (error) {
+			console.error('Error creating wallet:', error);
+			throw new Error('Failed to create wallet');
+		}
 	}
 }

@@ -57,13 +57,11 @@ export default async function userRoutes(fastify: FastifyInstance) {
     handler: userController.getProfile.bind(userController),
   });
 
-  fastify.put('/users/profile', {
-    schema: updateAuthenticatedProfileSchema,
-    preHandler: authenticate,
-    handler: async (request: FastifyRequest<ProfileUpdateRoute>, reply: FastifyReply) => {
-      return userController.updateAuthenticatedProfile(request, reply);
-    },
-  });
+  // fastify.put('/users/profile', {
+  //   schema: updateAuthenticatedProfileSchema,
+  //   preHandler: authenticate,
+  //   handler: userController.updateAuthenticatedProfile.bind(userController),
+  // });
 
   fastify.get('/users', {
     schema: getAllUsersSchema,
@@ -135,5 +133,5 @@ export default async function userRoutes(fastify: FastifyInstance) {
     handler: async (request: FastifyRequest<AvatarRequest>, reply: FastifyReply) => {
       await uploadController.deleteAvatar(request, reply, fastify);
     },
-  }); 
+  });
 }
