@@ -23,36 +23,50 @@ export const createGame = async (
     if (!user) {
         throw new Error(`User with ID ${userId} not found`);
     }
-    // User chosen mode
+
     const timeLimit = playMode === PlayMode.bullet ? 1 : playMode === PlayMode.blitz ? 3 : 10;
-    // User choosen Black or White side
     const whitePlayerId = colorPreference === 'white' || (colorPreference === 'random' && Math.random() > 0.5) ? userId : opponentId;
     const blackPlayerId = whitePlayerId === userId ? opponentId : userId;
 
-    // Create a new game in NeonDB
-    const game = await prisma.games.create({
-        data: {
-            id: uuidv4(),
-            userId: userId
+    try {
+        // Start a transaction for Prisma
+        const game = await prisma.$transaction(async (prisma) => {
+            return prisma.games.create({
+                data: {
+                    id: uuidv4(),
+                    userId: userId
+                }
+            });
+        });
+
+        try {
+            // Create GameSession in MongoDB
+            await GameSession.create({
+                gameId: game.id,
+                whitePlayerId: whitePlayerId || null,
+                blackPlayerId: blackPlayerId || null,
+                startTime: new Date(),
+                endTime: null,
+                result: '*',
+                status: opponentId ? 'pending' : 'waiting',
+                playMode: playMode,
+                timeLimit: timeLimit * 60 * 1000,
+                moves: [],
+                challengedOpponentId: opponentId || null
+            });
+        } catch (mongoError) {
+            console.error(`Failed to create GameSession in MongoDB: ${mongoError.message}`);
+
+            // Rollback Prisma game creation
+            await prisma.games.delete({ where: { id: game.id } });
+
+            throw new Error('Failed to create GameSession. Game creation rolled back.');
         }
-    })
 
-    // Create GameSession in MongoDB
-    await GameSession.create({
-        gameId: game.id,
-        whitePlayerId: whitePlayerId || null,
-        blackPlayerId: blackPlayerId || null,
-        startTime: new Date(),
-        endTime: null,
-        result: '*',
-        status: opponentId ? 'pending' : 'waiting', // Pending if opponent player is ready, waiting if no opponent player and wait for other to join
-        playMode: playMode,
-        timeLimit: timeLimit * 60 * 1000,
-        moves: [],
-        challengedOpponentId: opponentId || null
-    });
-
-    return game.id;
+        return game.id;
+    } catch (error) {
+        throw new Error(`Failed to create game: ${error.message}`);
+    }
 }
 
 
@@ -273,7 +287,6 @@ export const findMatch = async (
     colorChoice: 'white' | 'black' | 'random',
     socketId: string
 ) => {
-    // First verify that the user exists
     const user = await prisma.users.findUnique({
         where: { id: userId }
     });
@@ -295,7 +308,6 @@ export const findMatch = async (
         timestamp: Date.now()
     };
 
-    // Check if player is already in queue
     const existingIndex = matchmakingQueue.findIndex(p => p.userId === userId);
     if (existingIndex !== -1) {
         matchmakingQueue[existingIndex] = queuedPlayer;
@@ -303,85 +315,69 @@ export const findMatch = async (
         matchmakingQueue.push(queuedPlayer);
     }
 
-    // Try to find a match
     const matchIndex = matchmakingQueue.findIndex((player) => {
-        if (player.userId === userId) return false; // Don't match with self
-
-        // Check play mode
+        if (player.userId === userId) return false;
         if (player.playMode !== playMode) return false;
-
-        // Check ELO range
         if (player.elo < minElo || player.elo > maxElo) return false;
-
-        // Check color compatibility
         if (colorChoice === 'white' && player.colorChoice === 'white') return false;
         if (colorChoice === 'black' && player.colorChoice === 'black') return false;
-
         return true;
     });
 
     if (matchIndex !== -1) {
         const matchedPlayer = matchmakingQueue[matchIndex];
-        // Remove both players from queue
         matchmakingQueue.splice(matchIndex, 1);
         const currentPlayerIndex = matchmakingQueue.findIndex(p => p.userId === userId);
         if (currentPlayerIndex !== -1) {
             matchmakingQueue.splice(currentPlayerIndex, 1);
         }
 
-        // Create game session for matched players
-        const game = await prisma.games.create({
-            data: {
-                id: uuidv4(),
-                userId: userId,
-                status: 'active'
+        try {
+            const game = await prisma.$transaction(async (prisma) => {
+                return prisma.games.create({
+                    data: {
+                        id: uuidv4(),
+                        userId: userId,
+                        status: 'active'
+                    }
+                });
+            });
+
+            try {
+                await GameSession.create({
+                    gameId: game.id,
+                    whitePlayerId: colorChoice === 'white' ? userId : matchedPlayer.userId,
+                    blackPlayerId: colorChoice === 'black' ? userId : matchedPlayer.userId,
+                    whitePlayerElo: colorChoice === 'white' ? user.elo : matchedPlayer.elo,
+                    blackPlayerElo: colorChoice === 'black' ? user.elo : matchedPlayer.elo,
+                    startTime: new Date(),
+                    endTime: null,
+                    result: GameResult.inProgress,
+                    status: GameStatus.active,
+                    playMode,
+                    timeLimit: (playMode === PlayMode.bullet ? 1 : playMode === PlayMode.blitz ? 3 : 10) * 60 * 1000,
+                    moves: []
+                });
+
+                return {
+                    gameId: game.id,
+                    matchedPlayer: {
+                        userId: matchedPlayer.userId,
+                        socketId: matchedPlayer.socketId
+                    }
+                };
+            } catch (mongoError) {
+                console.error(`Failed to create GameSession in MongoDB: ${mongoError.message}`);
+
+                await prisma.games.delete({ where: { id: game.id } });
+
+                throw new Error('Failed to create GameSession. Matchmaking rolled back.');
             }
-        });
-
-        // Determine player colors
-        let whitePlayerId: string;
-        let blackPlayerId: string;
-        let whitePlayerElo: number;
-        let blackPlayerElo: number;
-
-        if (colorChoice === 'white' || (colorChoice === 'random' && matchedPlayer.colorChoice !== 'white')) {
-            whitePlayerId = userId;
-            blackPlayerId = matchedPlayer.userId;
-            whitePlayerElo = user.elo;
-            blackPlayerElo = matchedPlayer.elo;
-        } else {
-            whitePlayerId = matchedPlayer.userId;
-            blackPlayerId = userId;
-            whitePlayerElo = matchedPlayer.elo;
-            blackPlayerElo = user.elo;
+        } catch (error) {
+            throw new Error(`Failed to create match: ${error.message}`);
         }
-
-        // Create game session
-        await GameSession.create({
-            gameId: game.id,
-            whitePlayerId,
-            blackPlayerId,
-            whitePlayerElo,
-            blackPlayerElo,
-            startTime: new Date(),
-            endTime: null,
-            result: GameResult.inProgress,
-            status: GameStatus.active,
-            playMode,
-            timeLimit: (playMode === PlayMode.bullet ? 1 : playMode === PlayMode.blitz ? 3 : 10) * 60 * 1000,
-            moves: []
-        });
-
-        return {
-            gameId: game.id,
-            matchedPlayer: {
-                userId: matchedPlayer.userId,
-                socketId: matchedPlayer.socketId
-            }
-        };
     }
 
-    // No match found, player remains in queue
     return null;
 }
 
@@ -676,7 +672,7 @@ export const respondToChallenge = async (
         return {
             success: false,
             message: 'Failed to create game session',
-            
+
         };
     }
 };
