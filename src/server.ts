@@ -14,6 +14,8 @@ import userRoutes from './routes/user.routes';
 import gameRoutes from './routes/game.routes';
 //import * as GameController from './controllers/game.controller';
 //import * as GameService from './services/game.service';
+import marketplaceRoutes from './routes/marketplace.routes';
+import { setupEventListeners } from './services/marketplace.service';
 import { PrismaClient } from '@prisma/client';
 import basePath from './types/pathConfig.ts';
 
@@ -30,6 +32,8 @@ server.register(fastifyCors, {
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
 });
+
+server.register(marketplaceRoutes, { prefix: '/marketplace' });
 
 // Register JWT
 server.register(fastifyJwt, {
@@ -197,6 +201,7 @@ server.addHook('onClose', async () => {
 });
 
 start();
+setupEventListeners();
 
 // Extend Fastify instance interface
 declare module 'fastify' {
