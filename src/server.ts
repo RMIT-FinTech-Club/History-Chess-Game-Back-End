@@ -3,23 +3,24 @@ import fastifyCors from '@fastify/cors';
 import fastifyJwt from '@fastify/jwt';
 import fastifyOAuth2 from '@fastify/oauth2';
 import fastifyMultipart from '@fastify/multipart';
-//import { Server as SocketIOServer, Socket } from 'socket.io';
 import { postgresPrisma } from './configs/prismaClient';
 import * as dotenv from 'dotenv';
 import neonPlugin from './plugins/neon';
 import mongodbPlugin from './plugins/mongodb';
 import websocketPlugin from './plugins/websocket';
 import prismaPlugin from './plugins/prisma';
+import walletRoutes from './routes/wallet.routes';
 import userRoutes from './routes/user.routes';
 import gameRoutes from './routes/game.routes';
-//import * as GameController from './controllers/game.controller';
-//import * as GameService from './services/game.service';
 import { PrismaClient } from '@prisma/client';
 import basePath from './types/pathConfig.ts';
 
+// ✅ NEW: Import RabbitMQ
+import { initializeRabbitMQ, getRabbitMQ } from './configs/rabbitmq.ts';
+
 dotenv.config();
 
-const port: number = parseInt(process.env.PORT || '8080', 10)
+const port: number = parseInt(process.env.PORT || '8080', 10);
 
 const server: FastifyInstance = Fastify({ logger: true });
 
@@ -105,69 +106,51 @@ server.register(import('@fastify/swagger-ui'), {
 });
 
 // Register plugins
-server.register(mongodbPlugin)
-server.register(neonPlugin)
-server.register(websocketPlugin)
-server.register(prismaPlugin)
-// server.register(gameRoutes)
+server.register(mongodbPlugin);
+server.register(neonPlugin);
+server.register(websocketPlugin);
+server.register(prismaPlugin);
 
-//Register Routes
+// Register Routes
 server.register(userRoutes);
-server.register(gameRoutes, { prefix: '/game' })
+server.register(gameRoutes, { prefix: '/game' });
+server.register(walletRoutes);
 
 server.ready(() => {
-
   server.log.info('Server is ready!');
   server.log.info('All registered routes:');
   server.log.info(server.printRoutes());
-
-
-
-  // io.on('connection', (socket: Socket) => {
-  //   server.log.info(`Socket connected: ${socket.id}`);
-
-  //   // Keep messageFromClient handler commented out but intact
-  //   // socket.on('messageFromClient', (data: string) => {
-  //   //   server.log.info(`Received message from client ${socket.id}: ${data}`);
-  //   //   io.emit('messageFromServer', {
-  //   //     senderId: socket.id,
-  //   //     message: `Server received (manual - TypeScript ESM): ${data}`,
-  //   //   });
-  //   // });
-
-  //   socket.on('joinGame', (data: { elo: number }) => {
-  //     server.log.info(`\nPlayer ${socket.id} requesting to join game with data: ${JSON.stringify(data)}`);
-  //     GameController.handleJoinGame(socket, io, data.elo || 1200);
-  //   });
-
-  //   socket.on('makeMove', (data: { gameId: string, move: string }) => {
-  //     GameService.handleMove(socket, io, data.gameId, data.move);
-  //   });
-
-  //   socket.on('disconnect', (reason: string) => {
-  //     server.log.info(`Socket disconnected: ${socket.id} due to ${reason}`);
-  //     GameController.handleDisconnect(socket, reason);
-  //   });
-
-  //   socket.emit('welcomeMessage', 'Welcome to the Chess Game Realtime Server!');
-  // });
-
-
-
 });
 
-
+// Root route
 server.get('/', async (request, reply) => {
-  return { hello: 'world from Fastify + Manual Socket.IO (TypeScript ESM)!' };
+  return { 
+    hello: 'world from Fastify + Manual Socket.IO (TypeScript ESM)!',
+    rabbitmq: getRabbitMQ().isConnected() ? 'connected' : 'disconnected'
+  };
 });
 
+// ✅ NEW: Health check with RabbitMQ status
 server.get('/health', async (request, reply) => {
   try {
     await (server.neon as unknown as { query: (sql: string) => Promise<unknown> }).query('SELECT 1');
+    
+    const rabbitmq = getRabbitMQ();
+    const rabbitmqStatus = rabbitmq.getStatus();
+    
     return {
       status: 'ok',
-      mongodb: 'connected',
-      neon: 'connected',
+      timestamp: new Date().toISOString(),
+      services: {
+        mongodb: 'connected',
+        neon: 'connected',
+        rabbitmq: rabbitmqStatus.connected ? 'connected' : 'disconnected',
+      },
+      rabbitmq: {
+        connected: rabbitmqStatus.connected,
+        reconnectAttempts: rabbitmqStatus.reconnectAttempts,
+        queues: rabbitmqStatus.config.queues
+      }
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
@@ -179,23 +162,126 @@ server.get('/health', async (request, reply) => {
   }
 });
 
+// ✅ NEW: RabbitMQ queue status endpoint
+server.get('/queue-status', async (request, reply) => {
+  try {
+    const rabbitmq = getRabbitMQ();
+    
+    if (!rabbitmq.isConnected()) {
+      return reply.status(503).send({
+        status: 'error',
+        message: 'RabbitMQ not connected'
+      });
+    }
+    
+    const channel = rabbitmq.getChannel();
+    const queues = rabbitmq.getQueues();
+    
+    // Get queue stats
+    const mainQueueInfo = await channel.checkQueue(queues.rewardQueue);
+    const dlqInfo = await channel.checkQueue(queues.rewardDLQ);
+    
+    return {
+      status: 'ok',
+      queues: {
+        main: {
+          name: queues.rewardQueue,
+          messages: mainQueueInfo.messageCount,
+          consumers: mainQueueInfo.consumerCount
+        },
+        dlq: {
+          name: queues.rewardDLQ,
+          messages: dlqInfo.messageCount,
+          consumers: dlqInfo.consumerCount
+        }
+      }
+    };
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return reply.status(500).send({
+      status: 'error',
+      message: message
+    });
+  }
+});
+
+// ✅ NEW: Start function with RabbitMQ initialization
 const start = async () => {
   try {
+    // 1. Connect to PostgreSQL (NeonDB)
     await postgresPrisma.$connect();
-    server.log.info('Connected to NeonDB via Prisma');
+    server.log.info('✅ Connected to NeonDB via Prisma');
+
+    // 2. Initialize RabbitMQ
+    server.log.info('🔌 Initializing RabbitMQ...');
+    await initializeRabbitMQ();
+    server.log.info('✅ RabbitMQ initialized successfully');
+
+    // 3. Start Fastify server
     await server.listen({ port: port, host: '0.0.0.0' });
-    server.log.info(`Server running on ${basePath}`);
+    server.log.info(`🚀 Server running on ${basePath}`);
+    
+    // 4. Log startup summary
+    server.log.info('\n' + '='.repeat(60));
+    server.log.info('📊 SERVICE STATUS');
+    server.log.info('='.repeat(60));
+    server.log.info(`✅ HTTP Server: ${basePath}`);
+    server.log.info(`✅ PostgreSQL (NeonDB): Connected`);
+    server.log.info(`✅ MongoDB: Connected`);
+    server.log.info(`✅ RabbitMQ: Connected`);
+    server.log.info(`✅ WebSocket: Ready`);
+    server.log.info('='.repeat(60) + '\n');
+
   } catch (err) {
-    server.log.error(err);
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+    server.log.error(`❌ Server startup failed: ${errorMessage}`);
+    if (err instanceof Error && err.stack) {
+      server.log.error(err.stack);
+    }
     process.exit(1);
   }
 };
 
+// ✅ NEW: Graceful shutdown with RabbitMQ cleanup
 server.addHook('onClose', async () => {
-  await postgresPrisma.$disconnect();
-  server.log.info('Prisma connection closed');
+  server.log.info('🔄 Shutting down server...');
+  
+  try {
+    // Close RabbitMQ connection
+    const rabbitmq = getRabbitMQ();
+    await rabbitmq.close();
+    server.log.info('✅ RabbitMQ connection closed');
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    server.log.error(`❌ Error closing RabbitMQ: ${errorMessage}`);
+  }
+  
+  try {
+    // Close Prisma connection
+    await postgresPrisma.$disconnect();
+    server.log.info('✅ Prisma connection closed');
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    server.log.error(`❌ Error closing Prisma: ${errorMessage}`);
+  }
+  
+  server.log.info('👋 Server shutdown complete');
 });
 
+// Handle process termination signals
+process.on('SIGINT', async () => {
+  server.log.info('⚠️  SIGINT received, shutting down gracefully...');
+  await server.close();
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  server.log.info('⚠️  SIGTERM received, shutting down gracefully...');
+  await server.close();
+  process.exit(0);
+});
+
+// Start the server
 start();
 
 // Extend Fastify instance interface

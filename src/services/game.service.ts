@@ -35,7 +35,7 @@ export const createGame = async (
   // User choosen Black or White side
   const whitePlayerId =
     colorPreference === "white" ||
-    (colorPreference === "random" && Math.random() > 0.5)
+      (colorPreference === "random" && Math.random() > 0.5)
       ? userId
       : opponentId;
   const blackPlayerId = whitePlayerId === userId ? opponentId : userId;
@@ -123,10 +123,8 @@ export const saveMove = async (
     const currentMoveDetails: Move | undefined = fullHistory[moveNumber - 1];
     if (!currentMoveDetails) {
       console.error(
-        `[saveMove] Critical Error: Could not find chess.js Move object at expected index ${
-          moveNumber - 1
-        } for move "${move}" (move #${moveNumber}). Full history length: ${
-          fullHistory.length
+        `[saveMove] Critical Error: Could not find chess.js Move object at expected index ${moveNumber - 1
+        } for move "${move}" (move #${moveNumber}). Full history length: ${fullHistory.length
         }.`
       );
       throw new Error(
@@ -403,8 +401,8 @@ export const findMatch = async (
         (playMode === PlayMode.bullet
           ? 1
           : playMode === PlayMode.blitz
-          ? 3
-          : 10) *
+            ? 3
+            : 10) *
         60 *
         1000,
       moves: [],

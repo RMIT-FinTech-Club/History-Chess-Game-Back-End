@@ -1,42 +1,52 @@
 generator client {
-  provider = "prisma-client-js"
+    provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("NEON_URL")
+    provider = "postgresql"
+    url      = env("NEON_URL")
 }
 
 model users {
-  id             String   @unique @default(uuid())
-  username       String   @unique
-  email          String   @unique
-  hashedPassword String
-  walletAddress  String?  @unique
-  elo            Int      @default(400)
-  avatarUrl      String? // URL to the avatar image in AWS S3
-  language       String   @default("en")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  googleAuth    Boolean  @default(false)
+    id             String   @unique @default(uuid())
+    username       String   @unique
+    email          String   @unique
+    hashedPassword String
+    walletAddress  String?  @unique // migrate to the Wallet model
+    elo            Int      @default(400)
+    avatarUrl      String?
+    language       String   @default("en")
+    createdAt      DateTime @default(now())
+    updatedAt      DateTime @updatedAt
+    googleAuth     Boolean  @default(false)
 
-  ownedNFTs nfts[]
-  games     games[]
+    ownedNFTs nfts[]
+    games     games[]
+    wallet    wallet?
+}
+
+model wallet {
+    id        String   @id @default(uuid())
+    address   String   @unique
+    userId    String   @unique
+    user      users    @relation(fields: [userId], references: [id])
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
 }
 
 model nfts {
-  id           String   @unique @default(uuid())
-  tokenId      String   @unique
-  owner        users?   @relation(fields: [ownerId], references: [id])
-  ownerId      String?
-  detailedInfo Json
-  mintedTime   DateTime @default(now())
+    id           String   @unique @default(uuid())
+    tokenId      String   @unique
+    owner        users?   @relation(fields: [ownerId], references: [id])
+    ownerId      String?
+    detailedInfo Json
+    mintedTime   DateTime @default(now())
 }
 
 model games {
-  id        String   @unique @default(uuid())
-  userId    String
-  user      users    @relation(fields: [userId], references: [id])
-  createdAt DateTime @default(now())
-  status    String   @default("active")
+    id        String   @unique @default(uuid())
+    userId    String
+    user      users    @relation(fields: [userId], references: [id])
+    createdAt DateTime @default(now())
+    status    String   @default("active")
 }

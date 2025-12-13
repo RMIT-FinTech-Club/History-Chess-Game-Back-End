@@ -1,165 +1,229 @@
 generator client {
-     provider = "prisma-client-js"
- }
- 
- datasource db {
-     provider = "mongodb"
-     url      = env("MONGODB_URL")
- }
- 
- model Games {
-     id               String        @id @default(auto()) @map("_id") @db.ObjectId
-     gameType         GameType
-     players          Players
-     current_state_id String?       @db.ObjectId
-     mode             GameMode
-     status           GameStatus
-     aiDifficulty     AIDifficulty?
-     nftskins         NFTSkins?
-     timers           Timers?
-     createdAt        DateTime      @default(now())
-     updatedAt        DateTime      @updatedAt
- 
-     states      States[]      @relation("GameStates")
-     moves       Moves[]       @relation("GameMoves")
-     invitations Invitation[]  @relation("GameInvitations")
-     history     GameHistory[] @relation("GameHistory")
- }
- 
- type Players {
-     white Int
-     black Int
- }
- 
- type NFTSkins {
-     white Int?
-     black Int?
- }
- 
- type Timers {
-     white TimerDetails
-     black TimerDetails
- }
- 
- type TimerDetails {
-     startTime   DateTime
-     currentTime Float
- }
- 
- enum GameType {
-     PLAYER_VS_PLAYER
-     PLAYER_VS_AI
- }
- 
- enum GameMode {
-     PUBLIC
-     PRIVATE
- }
- 
- enum GameStatus {
-     WAITING
-     PAUSING
-     ONGOING
-     FINISHED
-     RESIGNED
-     TIMEOUT
- }
- 
- enum AIDifficulty {
-     EASY
-     MEDIUM
-     HARD
- }
- 
- model MarketplaceListings {
-     id              String        @id @default(auto()) @map("_id") @db.ObjectId
-     nftId           String
-     sellerId        String
-     price           Float
-     status          ListingStatus
-     startTime       DateTime      @default(now())
-     terminateTime   DateTime?
-     transactionHash String?
- }
- 
- enum ListingStatus {
-     OPEN
-     SOLD
-     CANCELLED
-     EXPIRED
- }
- 
- model GameHistory {
-     id            String     @id @default(auto()) @map("_id") @db.ObjectId
-     gameId        String     @db.ObjectId
-     whitePlayerId String
-     blackPlayerId String
-     result        GameResult
-     nftSkins      NFTSkins?
-     completedTime DateTime
-     game          Games      @relation("GameHistory", fields: [gameId], references: [id])
- }
- 
- enum GameResult {
-     WHITE_WINS
-     BLACK_WINS
-     WHITE_RESIGNS
-     BLACK_RESIGNS
-     WHITE_TIMEOUT
-     BLACK_TIMEOUT
- }
- 
- model Invitation {
-     id          String           @id @default(auto()) @map("_id") @db.ObjectId
-     gameId      String           @db.ObjectId
-     token       String
-     senderId    String
-     recipientId String?
-     status      InvitationStatus
-     expiredAt   DateTime?
-     createdAt   DateTime         @default(now())
-     game        Games            @relation("GameInvitations", fields: [gameId], references: [id])
- }
- 
- enum InvitationStatus {
-     PENDING
-     ACCEPTED
-     EXPIRED
-     CANCELLED
- }
- 
- model Moves {
-     id         String      @id @default(auto()) @map("_id") @db.ObjectId
-     moveName   String
-     playerId   String
-     chessPiece String
-     gameId     String      @db.ObjectId
-     createdAt  DateTime    @default(now())
-     isValid    Boolean
-     result     MoveResult?
-     game       Games       @relation("GameMoves", fields: [gameId], references: [id])
-     states     States[]    @relation("MoveStates")
- }
- 
- enum MoveResult {
-     CHECK
-     CHECKMATE
-     STALEMATE
-     NONE
- }
- 
- model States {
-     id         String   @id @default(auto()) @map("_id") @db.ObjectId
-     gameId     String   @db.ObjectId
-     moveId     String   @db.ObjectId
-     boardState String
-     updatedAt  DateTime @updatedAt
-     turn       Turn
-     game       Games    @relation("GameStates", fields: [gameId], references: [id])
-     move       Moves    @relation("MoveStates", fields: [moveId], references: [id])
- }
- 
- enum Turn {
-     WHITE
-     BLACK
- }
+    provider = "prisma-client-js"
+}
+
+datasource db {
+    provider = "mongodb"
+    url      = env("MONGODB_URL")
+}
+
+model Games {
+    id               String        @id @default(auto()) @map("_id") @db.ObjectId
+    gameType         GameType
+    players          Players
+    current_state_id String?       @db.ObjectId
+    mode             GameMode
+    status           GameStatus
+    aiDifficulty     AIDifficulty?
+    nftskins         NFTSkins?
+    timers           Timers?
+    createdAt        DateTime      @default(now())
+    updatedAt        DateTime      @updatedAt
+
+    states      States[]      @relation("GameStates")
+    moves       Moves[]       @relation("GameMoves")
+    invitations Invitation[]  @relation("GameInvitations")
+    history     GameHistory[] @relation("GameHistory")
+}
+
+type Players {
+    white Int
+    black Int
+}
+
+type NFTSkins {
+    white Int?
+    black Int?
+}
+
+type Timers {
+    white TimerDetails
+    black TimerDetails
+}
+
+type TimerDetails {
+    startTime   DateTime
+    currentTime Float
+}
+
+enum GameType {
+    PLAYER_VS_PLAYER
+    PLAYER_VS_AI
+}
+
+enum GameMode {
+    PUBLIC
+    PRIVATE
+}
+
+enum GameStatus {
+    WAITING
+    PAUSING
+    ONGOING
+    FINISHED
+    RESIGNED
+    TIMEOUT
+}
+
+enum AIDifficulty {
+    EASY
+    MEDIUM
+    HARD
+}
+
+model MarketplaceListings {
+    id              String        @id @default(auto()) @map("_id") @db.ObjectId
+    nftId           String
+    sellerId        String
+    price           Float
+    status          ListingStatus
+    startTime       DateTime      @default(now())
+    terminateTime   DateTime?
+    transactionHash String?
+}
+
+enum ListingStatus {
+    OPEN
+    SOLD
+    CANCELLED
+    EXPIRED
+}
+
+model GameHistory {
+    id            String     @id @default(auto()) @map("_id") @db.ObjectId
+    gameId        String     @db.ObjectId
+    whitePlayerId String
+    blackPlayerId String
+    result        GameResult
+    nftSkins      NFTSkins?
+    completedTime DateTime
+    game          Games      @relation("GameHistory", fields: [gameId], references: [id])
+}
+
+enum GameResult {
+    WHITE_WINS
+    BLACK_WINS
+    WHITE_RESIGNS
+    BLACK_RESIGNS
+    WHITE_TIMEOUT
+    BLACK_TIMEOUT
+}
+
+model Invitation {
+    id          String           @id @default(auto()) @map("_id") @db.ObjectId
+    gameId      String           @db.ObjectId
+    token       String
+    senderId    String
+    recipientId String?
+    status      InvitationStatus
+    expiredAt   DateTime?
+    createdAt   DateTime         @default(now())
+    game        Games            @relation("GameInvitations", fields: [gameId], references: [id])
+}
+
+enum InvitationStatus {
+    PENDING
+    ACCEPTED
+    EXPIRED
+    CANCELLED
+}
+
+model Moves {
+    id         String      @id @default(auto()) @map("_id") @db.ObjectId
+    moveName   String
+    playerId   String
+    chessPiece String
+    gameId     String      @db.ObjectId
+    createdAt  DateTime    @default(now())
+    isValid    Boolean
+    result     MoveResult?
+    game       Games       @relation("GameMoves", fields: [gameId], references: [id])
+    states     States[]    @relation("MoveStates")
+}
+
+enum MoveResult {
+    CHECK
+    CHECKMATE
+    STALEMATE
+    NONE
+}
+
+model States {
+    id         String   @id @default(auto()) @map("_id") @db.ObjectId
+    gameId     String   @db.ObjectId
+    moveId     String   @db.ObjectId
+    boardState String
+    updatedAt  DateTime @updatedAt
+    turn       Turn
+    game       Games    @relation("GameStates", fields: [gameId], references: [id])
+    move       Moves    @relation("MoveStates", fields: [moveId], references: [id])
+}
+
+enum Turn {
+    WHITE
+    BLACK
+}
+
+// Blockchain sync status tracking
+model BlockchainSyncStatus {
+    id                 String   @id @default(auto()) @map("_id") @db.ObjectId
+    contractAddress    String   @unique
+    contractName       String // "GameCoin"
+    lastProcessedBlock Int      @default(0)
+    lastSyncAt         DateTime @default(now())
+    syncError          String?
+    isActive           Boolean  @default(true)
+}
+
+// Event processing log
+model BlockchainEventLog {
+    id              String @id @default(auto()) @map("_id") @db.ObjectId
+    contractAddress String
+    eventName       String // "MatchWin"
+    blockNumber     Int
+    transactionHash String @unique
+    logIndex        Int
+
+    // Event data
+    playerAddress String
+    rewardAmount  String
+    matchType     String
+
+    // Processing status
+    processed   Boolean   @default(false)
+    processedAt DateTime?
+    error       String?
+    retryCount  Int       @default(0)
+    createdAt   DateTime  @default(now())
+
+    @@index([contractAddress, blockNumber])
+    @@index([processed, createdAt])
+    @@index([playerAddress, createdAt])
+}
+
+// Record failed transactions for retrying 
+model FailedBlockchainTransaction {
+    id              String @id @default(auto()) @map("_id") @db.ObjectId
+    userId          String // References PostgreSQL users.id
+    walletAddress   String
+    transactionType String // "reward"
+    amount          String
+
+    // Error details
+    error      String
+    retryCount Int    @default(0)
+    maxRetries Int    @default(3)
+
+    // Timing
+    firstAttemptAt DateTime  @default(now())
+    lastAttemptAt  DateTime  @default(now())
+    nextRetryAt    DateTime?
+
+    // Status
+    status        String    @default("pending") // pending, retrying, failed, abandoned
+    resolvedAt    DateTime?
+    gameSessionId String?
+
+    @@index([status, nextRetryAt])
+    @@index([userId, firstAttemptAt])
+}
