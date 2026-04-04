@@ -7,7 +7,7 @@ WORKDIR /app
 # Copy package and lock files
 COPY package.json package-lock.json ./
 # Install ALL dependencies, including dev (we need tsc and prisma)
-RUN npm install --legacy-peer-deps
+RUN npm install --legacy-peer-deps --ignore-scripts
 
 # Copy the rest of the application
 COPY . .
