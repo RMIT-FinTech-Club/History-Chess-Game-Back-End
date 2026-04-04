@@ -26,7 +26,7 @@ ENV NODE_ENV=production
 
 # Copy only production dependencies or reinstall them
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev --ignore-scripts
 
 # Copy generated Prisma files and build artifacts
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
