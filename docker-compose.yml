@@ -2,30 +2,56 @@ version: '3.8'
 
 services:
   rabbitmq:
-    image: rabbitmq:management
-    container_name: rabbitmq
+    image: rabbitmq:3-management
+    container_name: history_chess_rabbitmq
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "5672:5672"   # AMQP protocol
+      - "15672:15672" # Management UI
     environment:
-      RABBITMQ_DEFAULT_USER: admin
-      RABBITMQ_DEFAULT_PASS: admin123
-    networks:
-      - app_net
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  ganache:
-    image: trufflesuite/ganache
-    container_name: ganache
+  besu:
+    image: hyperledger/besu:23.10.3
+    container_name: history_chess_besu
     ports:
-      - "8545:8545"
-    command: >
-      --accounts=10
-      --defaultBalanceEther=1000
-      --mnemonic="test test test test test test test test test test test junk"
-      --gasLimit=8000000
-    networks:
-      - app_net
+      - "8545:8545" # HTTP JSON-RPC
+      - "8546:8546" # WS JSON-RPC
+    volumes:
+      - besu_data:/opt/besu/data
+    command: [
+      "--network=dev",
+      "--miner-enabled=true",
+      "--miner-coinbase=0x627306090abaB3A6e1400e9345bC60c78a8BEf57",
+      "--rpc-http-enabled=true",
+      "--rpc-http-host=0.0.0.0",
+      "--rpc-http-cors-origins=all",
+      "--host-allowlist=*",
+      "--rpc-http-api=ETH,NET,WEB3,DEBUG,MINER,TXPOOL,TRACE"
+    ]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8545"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-networks:
-  app_net:
-    driver: bridge
+  explorer:
+    image: alethio/ethereum-lite-explorer:latest
+    container_name: history_chess_explorer
+    ports:
+      - "4000:80"
+    environment:
+      - APP_NODE_URL=http://localhost:8545
+    depends_on:
+      - besu
+
+volumes:
+  rabbitmq_data:
+  besu_data:

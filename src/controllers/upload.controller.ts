@@ -1,6 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
-import { UserService } from '../services/user.service';
+import { config } from '../configs/unifiedConfig';
+import { CompositionRoot } from '../configs/compositionRoot';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface AvatarRequest {
@@ -17,9 +18,7 @@ export const uploadController = {
   ): Promise<void> {
     try {
       const userId = request.authUser?.id;
-      request.log.info(`Avatar upload attempt: userId=${userId}, params.id=${request.params.id}, user=${JSON.stringify(request.authUser)}, authHeader=${request.headers.authorization}`);
       if (!userId || userId !== request.params.id) {
-        request.log.warn(`Unauthorized avatar upload: userId=${userId}, params.id=${request.params.id}`);
         reply.status(401).send({ message: 'Unauthorized' });
         return;
       }
@@ -42,14 +41,14 @@ export const uploadController = {
       }
 
       const s3Client = new S3Client({
-        region: process.env.AWS_REGION || 'ap-southeast-2',
+        region: config.aws.region,
         credentials: {
-          accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
-          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
+          accessKeyId: config.aws.accessKeyId,
+          secretAccessKey: config.aws.secretAccessKey,
         },
       });
 
-      const userService = new UserService(fastify);
+      const { userService } = CompositionRoot.getInstance();
       const userResponse = await userService.getUserById(userId);
       if (!userResponse) {
         reply.status(404).send({ message: 'User not found' });
@@ -60,7 +59,7 @@ export const uploadController = {
         const oldKey = userResponse.avatarUrl.split('/').pop();
         if (oldKey) {
           await s3Client.send(new DeleteObjectCommand({
-            Bucket: process.env.AWS_S3_BUCKET_NAME || 'fintech-club-vietnamese-historical-chess-game',
+            Bucket: config.aws.s3BucketName,
             Key: `avatars/${oldKey}`,
           }));
           request.log.info(`Deleted old avatar: avatars/${oldKey}`);
@@ -72,14 +71,14 @@ export const uploadController = {
       const fileBuffer = await data.toBuffer();
 
       await s3Client.send(new PutObjectCommand({
-        Bucket: process.env.AWS_S3_BUCKET_NAME || 'fintech-club-vietnamese-historical-chess-game',
+        Bucket: config.aws.s3BucketName,
         Key: `avatars/${fileName}`,
         Body: fileBuffer,
         ContentType: data.mimetype,
       }));
       request.log.info(`Uploaded avatar: avatars/${fileName} via bucket policy`);
 
-      const avatarUrl = `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/avatars/${fileName}`;
+      const avatarUrl = `https://${config.aws.s3BucketName}.s3.${config.aws.region}.amazonaws.com/avatars/${fileName}`;
       request.log.info(`Generated avatar URL: ${avatarUrl}`);
 
       const updatedUserResponse = await userService.updateProfile(userId, { avatarUrl });
@@ -115,7 +114,7 @@ export const uploadController = {
         return;
       }
 
-      const userService = new UserService(fastify);
+      const { userService } = CompositionRoot.getInstance();
       const userResponse = await userService.getUserById(userId);
       if (!userResponse) {
         reply.status(404).send({ message: 'User not found' });
@@ -126,15 +125,15 @@ export const uploadController = {
         const oldKey = userResponse.avatarUrl.split('/').pop();
         if (oldKey) {
           const s3Client = new S3Client({
-            region: process.env.AWS_REGION || 'ap-southeast-2',
+            region: config.aws.region,
             credentials: {
-              accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
-              secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
+              accessKeyId: config.aws.accessKeyId,
+              secretAccessKey: config.aws.secretAccessKey,
             },
           });
 
           await s3Client.send(new DeleteObjectCommand({
-            Bucket: process.env.AWS_S3_BUCKET_NAME || 'fintech-club-vietnamese-historical-chess-game',
+            Bucket: config.aws.s3BucketName,
             Key: `avatars/${oldKey}`,
           }));
           request.log.info(`Deleted avatar: avatars/${oldKey}`);

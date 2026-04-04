@@ -4,895 +4,386 @@ import { PrismaClient } from "@prisma/client";
 import { v4 as uuidv4 } from "uuid";
 import { GameSession, IGameSession, IMove } from "../models/GameSession";
 import { PlayMode, GameResult, GameStatus } from "../types/enum";
-import validator from "validator";
-import { stockfishService } from "./stockfish.service";
-//import { User } from '../models';
 import {
-  GameHistoryItem,
   InMemoryGameSession,
   QueuedPlayer,
-  WaitingPlayer,
 } from "../types/game.types";
 import { CustomSocket } from "../types/socket.types";
 import { gameSessions } from "./socket.service";
-//import { timeStamp } from 'console';
-import { updateAfterGameSolidity } from "./solidity.service";
+import { UserRepository } from "../repositories/UserRepository";
+import { GameRepository } from "../repositories/GameRepository";
+import { GameSessionRepository } from "../repositories/GameSessionRepository";
+import { StockfishService } from "./stockfish.service";
+import { RabbitMQConnection } from "../configs/rabbitmq";
+import { StockfishPublisher } from "../queues/publishers/stockfish.publisher";
+import { RewardPublisher } from "../queues/publishers/reward.publisher";
+import { SolidityService } from "./solidity.service";
 
-export const createGame = async (
-  prisma: PrismaClient,
-  userId: string,
-  playMode: PlayMode,
-  colorPreference: "white" | "black" | "random" = "random",
-  opponentId?: string
-): Promise<string> => {
-  const user = await prisma.users.findUnique({ where: { id: userId } });
-  if (!user) {
-    throw new Error(`User with ID ${userId} not found`);
-  }
-  // User chosen mode
-  const timeLimit =
-    playMode === PlayMode.bullet ? 1 : playMode === PlayMode.blitz ? 3 : 10;
-  // User choosen Black or White side
-  const whitePlayerId =
-    colorPreference === "white" ||
+export class GameService {
+  private matchmakingQueue: QueuedPlayer[] = [];
+  private pendingChallenges: Map<string, any> = new Map();
+
+  constructor(
+    private readonly userRepository: UserRepository,
+    private readonly gameRepository: GameRepository,
+    private readonly gameSessionRepository: GameSessionRepository,
+    private readonly stockfishService: StockfishService,
+    private readonly solidityService: SolidityService,
+    private readonly rabbitMQ: RabbitMQConnection
+  ) {}
+
+  async createGame(
+    userId: string,
+    playMode: PlayMode,
+    colorPreference: "white" | "black" | "random" = "random",
+    opponentId?: string
+  ): Promise<string> {
+    const user = await this.userRepository.findById(userId);
+    if (!user) {
+      throw new Error(`User with ID ${userId} not found`);
+    }
+
+    const timeLimit =
+      playMode === PlayMode.bullet ? 1 : playMode === PlayMode.blitz ? 3 : 10;
+    
+    const whitePlayerId =
+      colorPreference === "white" ||
       (colorPreference === "random" && Math.random() > 0.5)
-      ? userId
-      : opponentId;
-  const blackPlayerId = whitePlayerId === userId ? opponentId : userId;
+        ? userId
+        : opponentId;
+    const blackPlayerId = whitePlayerId === userId ? opponentId : userId;
 
-  // Create a new game in NeonDB
-  const game = await prisma.games.create({
-    data: {
+    const game = await this.gameRepository.create({
       id: uuidv4(),
       userId: userId,
-    },
-  });
-
-  // Create GameSession in MongoDB
-  await GameSession.create({
-    gameId: game.id,
-    whitePlayerId: whitePlayerId || null,
-    blackPlayerId: blackPlayerId || null,
-    startTime: new Date(),
-    endTime: null,
-    result: "*",
-    status: opponentId ? "pending" : "waiting", // Pending if opponent player is ready, waiting if no opponent player and wait for other to join
-    playMode: playMode,
-    timeLimit: timeLimit * 60 * 1000,
-    moves: [],
-    challengedOpponentId: opponentId || null,
-  });
-
-  return game.id;
-};
-
-export const saveMove = async (
-  gameId: string,
-  move: string,
-  moveNumber: number,
-  playerColor: "white" | "black",
-  playerId: string,
-  moveDuration: number,
-  fen: string
-): Promise<IMove | null> => {
-  try {
-    //console.log(`Starting analysis for move ${moveNumber}: ${move}`);
-    //console.log(gameId, move, moveNumber, playerColor, fen, playerId);
-    // First save basic move data with required fields
-    await GameSession.updateOne(
-      { gameId },
-      {
-        $push: {
-          moves: {
-            moveNumber: moveNumber,
-            move: move,
-            fen: fen,
-            evaluation: 0,
-            bestmove: "",
-            mate: null,
-            continuation: "",
-            playerColor: playerColor,
-            playerId,
-            initialEvalCP: 0, // Placeholder
-            moveEvalCP: 0, // Placeholder
-            initialExpectedPoints: 0, // Placeholder
-            moveExpectedPoints: 0, // Placeholder
-            bestMoveExpectedPoints: 0, // Placeholder
-            expectedPointsLost: 0, // Placeholder
-            classification: "Analyzing...",
-            error: undefined,
-            timeStamp: new Date(),
-            duration: moveDuration / 1000,
-          },
-        },
-      }
-    );
-
-    //console.log(`Move ${moveNumber} saved to database, starting Stockfish analysis...`);
-
-    // Get analysis from Stockfish
-    // const session = gameSessions[gameId];
-    //console.log(gameSessions);
-    const session = gameSessions.get(gameId);
-    if (!session || !session.chess) {
-      // console.error(`[saveMove] Game session or chess.js instance not found for gameId: ${gameId}`);
-      throw new Error("Game session not found for analysis.");
-    }
-
-    const fullHistory: Move[] = session.chess.history({ verbose: true });
-    const currentMoveDetails: Move | undefined = fullHistory[moveNumber - 1];
-    if (!currentMoveDetails) {
-      console.error(
-        `[saveMove] Critical Error: Could not find chess.js Move object at expected index ${moveNumber - 1
-        } for move "${move}" (move #${moveNumber}). Full history length: ${fullHistory.length
-        }.`
-      );
-      throw new Error(
-        `Could not locate chess.js Move object for move "${move}" (move #${moveNumber}). Analysis aborted.`
-      );
-    }
-
-    const tempChessBeforeMove = new Chess();
-    for (let i = 0; i < moveNumber - 1; i++) {
-      // Apply all moves *before* the current one
-      const historicalMove = fullHistory[i];
-      if (historicalMove) {
-        tempChessBeforeMove.move(historicalMove);
-      } else {
-        throw new Error(
-          `Corrupted game history detected for game ${gameId} at move index ${i}. Analysis aborted.`
-        );
-      }
-    }
-    const fenBeforeMove = tempChessBeforeMove.fen();
-
-    const analysis: IMove = await stockfishService.analyzeAndClassifyMove(
-      fenBeforeMove,
-      currentMoveDetails, // This is now correctly the `Move` object
-      moveNumber
-    );
-    // console.log(`Stockfish analysis result:`, analysis);
-
-    // Update the move with analysis
-    const updateResult = await GameSession.updateOne(
-      { gameId, "moves.moveNumber": moveNumber },
-      {
-        $set: {
-          "moves.$.move": analysis.move,
-          "moves.$.fen": analysis.fen,
-          "moves.$.evaluation": analysis.evaluation,
-          "moves.$.bestmove": analysis.bestmove,
-          "moves.$.mate": analysis.mate,
-          "moves.$.continuation": analysis.continuation,
-          "moves.$.playerColor": analysis.playerColor,
-          "moves.$.initialEvalCP": analysis.initialEvalCP,
-          "moves.$.moveEvalCP": analysis.moveEvalCP,
-          "moves.$.initialExpectedPoints": analysis.initialExpectedPoints,
-          "moves.$.moveExpectedPoints": analysis.moveExpectedPoints,
-          "moves.$.bestMoveExpectedPoints": analysis.bestMoveExpectedPoints,
-          "moves.$.expectedPointsLost": analysis.expectedPointsLost,
-          "moves.$.classification": analysis.classification,
-          "moves.$.error": analysis.error || null,
-        },
-      }
-    );
-
-    // console.log(`Move ${moveNumber} analysis update result:`, updateResult);
-
-    if (updateResult.modifiedCount === 0) {
-      console.warn(
-        `No move was updated for gameId: ${gameId}, moveNumber: ${moveNumber}`
-      );
-    }
-
-    return analysis;
-  } catch (error) {
-    console.error(`Analysis failed for move ${moveNumber}:`, error);
-
-    // Update move with error indicator
-    try {
-      await GameSession.updateOne(
-        { gameId, "moves.moveNumber": moveNumber },
-        {
-          $set: {
-            "moves.$.evaluation": 0,
-            "moves.$.bestmove": "analysis_failed",
-            "moves.$.mate": null,
-            "moves.$.continuation": "Error: Analysis failed",
-          },
-        }
-      );
-    } catch (updateError) {
-      console.error("Failed to update move with error status:", updateError);
-    }
-
-    return null;
-  }
-};
-
-// Update game ressult
-export const saveGameResult = async (gameId: string, resultString: string) => {
-  let result: GameResult = GameResult.inProgress;
-  let winner: string | null = null;
-
-  // Parse the result string to determine the game result and winner
-  if (resultString.includes("White wins")) {
-    result = GameResult.whiteWins;
-    const game = await GameSession.findOne({ gameId });
-    winner = game?.whitePlayerId || null;
-  } else if (resultString.includes("Black wins")) {
-    result = GameResult.blackWins;
-    const game = await GameSession.findOne({ gameId });
-    winner = game?.blackPlayerId || null;
-  } else if (resultString.includes("Draw")) {
-    result = GameResult.draw;
-    winner = null;
-  }
-
-  // console.log(`Saving game result for ${gameId}: ${resultString} (${result}). Winner: ${winner || 'Draw'}`);
-
-  // Update game result in MongoDB database
-  await GameSession.updateOne(
-    { gameId },
-    {
-      $set: {
-        endTime: new Date(),
-        result,
-        winner,
-        status: GameStatus.finished,
-      },
-    }
-  );
-};
-
-export const calculateGameAccuracy = async (gameId: string): Promise<void> => {
-  const gameSession = await GameSession.findOne({ gameId: gameId });
-
-  if (!gameSession || !gameSession.moves) {
-    throw new Error("Game not found or has no moves");
-  }
-
-  // Then filter the moves array into white and black moves
-  const whiteMoves = gameSession.moves.filter(
-    (move) => move.playerColor === "w"
-  );
-  console.log(`White moves for game ${gameId}:`, whiteMoves);
-  const blackMoves = gameSession.moves.filter(
-    (move) => move.playerColor === "b"
-  );
-
-  const whiteAccuracy = await stockfishService.calculateGameAccuracy(
-    whiteMoves
-  );
-  console.log(`White accuracy for game ${gameId}:`, whiteAccuracy);
-  if (!whiteAccuracy) {
-    throw new Error("Failed to calculate white accuracy");
-  }
-
-  const blackAccuracy = await stockfishService.calculateGameAccuracy(
-    blackMoves
-  );
-  if (!blackAccuracy) {
-    throw new Error("Failed to calculate black accuracy");
-  }
-  await GameSession.updateOne(
-    { gameId },
-    {
-      $set: {
-        whiteAccuracyPoint: whiteAccuracy,
-        blackAccuracyPoint: blackAccuracy,
-      },
-    }
-  );
-};
-
-// In-memory matchmaking queue
-const matchmakingQueue: QueuedPlayer[] = [];
-
-// Find Match function
-export const findMatch = async (
-  prisma: PrismaClient,
-  userId: string,
-  playMode: PlayMode,
-  colorChoice: "white" | "black" | "random",
-  socketId: string
-) => {
-  // First verify that the user exists
-  const user = await prisma.users.findUnique({
-    where: { id: userId },
-  });
-
-  if (!user) {
-    throw new Error(`User with ID ${userId} not found`);
-  }
-
-  const eloRange = 1000;
-  const minElo = user.elo - eloRange;
-  const maxElo = user.elo + eloRange;
-
-  const queuedPlayer: QueuedPlayer = {
-    userId,
-    socketId,
-    playMode,
-    colorChoice,
-    elo: user.elo,
-    timestamp: Date.now(),
-  };
-
-  // Check if player is already in queue
-  const existingIndex = matchmakingQueue.findIndex((p) => p.userId === userId);
-  if (existingIndex !== -1) {
-    matchmakingQueue[existingIndex] = queuedPlayer;
-  } else {
-    matchmakingQueue.push(queuedPlayer);
-  }
-
-  // Try to find a match
-  const matchIndex = matchmakingQueue.findIndex((player) => {
-    if (player.userId === userId) return false; // Don't match with self
-
-    // Check play mode
-    if (player.playMode !== playMode) return false;
-
-    // Check ELO range
-    if (player.elo < minElo || player.elo > maxElo) return false;
-
-    // Check color compatibility
-    if (colorChoice === "white" && player.colorChoice === "white") return false;
-    if (colorChoice === "black" && player.colorChoice === "black") return false;
-
-    return true;
-  });
-
-  if (matchIndex !== -1) {
-    const matchedPlayer = matchmakingQueue[matchIndex];
-    // Remove both players from queue
-    matchmakingQueue.splice(matchIndex, 1);
-    const currentPlayerIndex = matchmakingQueue.findIndex(
-      (p) => p.userId === userId
-    );
-    if (currentPlayerIndex !== -1) {
-      matchmakingQueue.splice(currentPlayerIndex, 1);
-    }
-
-    // Create game session for matched players
-    const game = await prisma.games.create({
-      data: {
-        id: uuidv4(),
-        userId: userId,
-        status: "active",
-      },
     });
 
-    // Determine player colors
-    let whitePlayerId: string;
-    let blackPlayerId: string;
-    let whitePlayerElo: number;
-    let blackPlayerElo: number;
-
-    if (
-      colorChoice === "white" ||
-      (colorChoice === "random" && matchedPlayer.colorChoice !== "white")
-    ) {
-      whitePlayerId = userId;
-      blackPlayerId = matchedPlayer.userId;
-      whitePlayerElo = user.elo;
-      blackPlayerElo = matchedPlayer.elo;
-    } else {
-      whitePlayerId = matchedPlayer.userId;
-      blackPlayerId = userId;
-      whitePlayerElo = matchedPlayer.elo;
-      blackPlayerElo = user.elo;
-    }
-
-    // Create game session
-    await GameSession.create({
+    await this.gameSessionRepository.create({
       gameId: game.id,
-      whitePlayerId,
-      blackPlayerId,
-      whitePlayerElo,
-      blackPlayerElo,
+      whitePlayerId: whitePlayerId || null,
+      blackPlayerId: blackPlayerId || null,
       startTime: new Date(),
       endTime: null,
       result: GameResult.inProgress,
-      status: GameStatus.active,
-      playMode,
-      timeLimit:
-        (playMode === PlayMode.bullet
-          ? 1
-          : playMode === PlayMode.blitz
-            ? 3
-            : 10) *
-        60 *
-        1000,
+      status: opponentId ? GameStatus.pending : GameStatus.waiting,
+      playMode: playMode,
+      timeLimit: timeLimit * 60 * 1000,
       moves: [],
+      challengedOpponentId: opponentId || null,
     });
 
-    return {
-      gameId: game.id,
-      matchedPlayer: {
-        userId: matchedPlayer.userId,
-        socketId: matchedPlayer.socketId,
-      },
-    };
+    return game.id;
   }
 
-  // No match found, player remains in queue
-  return null;
-};
+  async saveMove(
+    gameId: string,
+    move: string,
+    moveNumber: number,
+    playerColor: "white" | "black",
+    playerId: string,
+    moveDuration: number,
+    fen: string
+  ): Promise<IMove | null> {
+    try {
+      const moveData: Partial<IMove> = {
+        moveNumber: moveNumber,
+        move: move,
+        fen: fen,
+        evaluation: 0,
+        bestmove: "",
+        mate: null,
+        continuation: "",
+        playerColor: playerColor === "white" ? "w" : "b",
+        playerId,
+        initialEvalCP: 0,
+        moveEvalCP: 0,
+        initialExpectedPoints: 0,
+        moveExpectedPoints: 0,
+        bestMoveExpectedPoints: 0,
+        expectedPointsLost: 0,
+        classification: "Analyzing...",
+        timestamp: new Date(),
+        duration: moveDuration / 1000,
+      };
 
-// Remove player from matchmaking queue
-export const removeFromMatchmaking = (userId: string) => {
-  const index = matchmakingQueue.findIndex((p) => p.userId === userId);
-  if (index !== -1) {
-    matchmakingQueue.splice(index, 1);
-  }
-};
+      await this.gameSessionRepository.addMove(gameId, moveData);
 
+      const session = gameSessions.get(gameId);
+      if (!session || !session.chess) {
+        throw new Error("Game session not found for analysis.");
+      }
 
-export const updateElo = async (
-  prisma: PrismaClient,
-  gameId: string,
-  winnerId: string | null
-) => {
-  const game: IGameSession | null = await GameSession.findOne({
-    gameId: gameId,
-  });
+      const fullHistory: Move[] = session.chess.history({ verbose: true });
+      const currentMoveDetails = fullHistory[moveNumber - 1];
 
-  if (!game || !game.whitePlayerId || !game.blackPlayerId) return;
+      if (!currentMoveDetails) {
+        throw new Error(`Could not locate chess.js Move object for move ${moveNumber}.`);
+      }
 
-  const [whiteUser, blackUser] = await Promise.all([
-    prisma.users.findUnique({ where: { id: game.whitePlayerId } }),
-    prisma.users.findUnique({ where: { id: game.blackPlayerId } }),
-  ]);
+      const tempChessBeforeMove = new Chess();
+      for (let i = 0; i < moveNumber - 1; i++) {
+        tempChessBeforeMove.move(fullHistory[i]);
+      }
+      const fenBeforeMove = tempChessBeforeMove.fen();
 
-  if (whiteUser && blackUser) {
-    const Ra = whiteUser.elo;
-    const Rb = blackUser.elo;
-    const Ea = 1 / (1 + Math.pow(10, (Rb - Ra) / 400));
-    const Eb = 1 / (1 + Math.pow(10, (Ra - Rb) / 400));
-    const K = 32;
-
-    let whiteScore, blackScore;
-    if (winnerId === whiteUser.id) {
-      whiteScore = 1;
-      blackScore = 0;
-    } else if (winnerId === blackUser.id) {
-      whiteScore = 0;
-      blackScore = 1;
-    } else {
-      whiteScore = blackScore = 0.5; // Draw or disconnect
-    }
-
-    const newWhiteElo = Math.round(Ra + K * (whiteScore - Ea));
-    const newBlackElo = Math.round(Rb + K * (blackScore - Eb));
-
-    await prisma.$transaction([
-      prisma.users.update({
-        where: { id: whiteUser.id },
-        data: { elo: newWhiteElo },
-      }),
-      prisma.users.update({
-        where: { id: blackUser.id },
-        data: { elo: newBlackElo },
-      }),
-    ]);
-
-    await updateAfterGameSolidity(
-      game.whitePlayerId,
-      newWhiteElo,
-      game.blackPlayerId,
-      newBlackElo
-    );
-
-    return { whiteElo: newWhiteElo, blackElo: newBlackElo };
-  } else {
-    return;
-  }
-};
-
-const waitingPlayers: WaitingPlayer[] = [];
-
-const generateGameId = (): string => {
-  return Math.random().toString(36).substring(2, 15);
-};
-
-export const createNewGameSession = (
-  socket1: Socket,
-  socket2: Socket
-): InMemoryGameSession => {
-  const gameId = generateGameId();
-  const chess = new Chess();
-  const newGame: InMemoryGameSession = {
-    gameId: gameId,
-    players: [],
-    playerSockets: [socket1, socket2],
-    chess: chess,
-    status: GameStatus.waiting,
-    whiteTimeLeft: 0,
-    blackTimeLeft: 0,
-    gameState: chess.fen(),
-  };
-  // gameSessions[gameId] = newGame;
-  gameSessions.set(gameId, newGame);
-  //console.log(gameSessions)
-  return newGame;
-};
-
-// export const joinGame = (socket: Socket, io: SocketIOServer, playerElo: number) => {
-//     // First check if this player is already in the waiting list
-//     const existingPlayerIndex = waitingPlayers.findIndex(player => player.socket.id === socket.id);
-//     if (existingPlayerIndex !== -1) {
-//         io.to(socket.id).emit('alreadyWaiting');
-//         console.log("Player already in waiting list", socket.id);
-//         return;
-//     }
-
-//     // Add the new player to waiting list
-//     waitingPlayers.push({ socket, elo: playerElo });
-//     io.to(socket.id).emit('waitingForOpponent');
-//     console.log("Player added to waiting list", socket.id);
-
-//     // Immediately try to find a match
-//     checkWaitingPlayersForMatches(io);
-// }
-
-// export const checkWaitingPlayersForMatches = (io: SocketIOServer) => {
-//     if (waitingPlayers.length < 2) return;
-
-//     for (let i = 0; i < waitingPlayers.length; i++) {
-//         const player = waitingPlayers[i];
-
-//         for (let j = i + 1; j < waitingPlayers.length; j++) {
-//             const opponent = waitingPlayers[j];
-
-//             if (Math.abs(player.elo - opponent.elo) <= 1000) {
-
-//                 // Remove both players from waiting list
-//                 waitingPlayers.splice(j, 1);
-//                 waitingPlayers.splice(i, 1);
-
-//                 const gameSession = createNewGameSession(player.socket, opponent.socket);
-//                 const gameId = gameSession.gameId;
-
-//                 player.socket.join(gameId);
-//                 opponent.socket.join(gameId);
-
-//                 io.to(gameId).emit('gameStart', { gameId: gameId, initialGameState: gameSessions[gameId].gameState });
-//                 io.to(player.socket.id).emit('gameJoined', { gameId: gameId, playerColor: 'white' });
-//                 io.to(opponent.socket.id).emit('gameJoined', { gameId: gameId, playerColor: 'black' });
-//                 console.log("Successfully matched players", player.socket.id, "and", opponent.socket.id);
-
-//                 i--;
-//                 break;
-//             }
-//         }
-//     }
-// }
-
-export const handleDisconnect = (socket: Socket): void => {
-  const index = waitingPlayers.findIndex(
-    (player) => player.socket.id === socket.id
-  );
-  if (index > -1) {
-    waitingPlayers.splice(index, 1);
-    //console.log(`Player removed from waiting list. Reason: ${reason}`);
-  }
-
-  for (const gameId in gameSessions) {
-    const session = gameSessions.get(gameId);
-    //console.log(session);
-    if (!session) continue;
-    const playerIndex = session.playerSockets.findIndex(
-      (s) => s.id === socket.id
-    );
-
-    if (playerIndex > -1) {
-      const otherPlayerIndex = playerIndex === 0 ? 1 : 0;
-      if (session.playerSockets[otherPlayerIndex]) {
-        session.playerSockets[otherPlayerIndex].emit("opponentDisconnected", {
+      if (this.rabbitMQ.isConnected()) {
+        await StockfishPublisher.publishMoveAnalysis({
           gameId,
+          fenBeforeMove,
+          moveDetails: currentMoveDetails,
+          moveNumber
         });
+
+        return {
+          move: currentMoveDetails.san,
+          fen: currentMoveDetails.after,
+          playerColor: moveData.playerColor,
+          playerId,
+          moveNumber,
+          classification: 'Analyzing...'
+        } as unknown as IMove;
+      } else {
+        throw new Error('RabbitMQ not connected.');
       }
-
-      // Remove the game session
-      // delete gameSessions[gameId];
-      gameSessions.delete(gameId);
-      //console.log(`Game session ${gameId} ended due to player disconnect`);
-      break;
+    } catch (error) {
+      console.error(`Analysis failed for game ${gameId} move ${moveNumber}:`, error);
+      return null;
     }
   }
-};
 
-const pendingChallenges: Map<
-  string,
-  {
-    challengerId: string;
-    opponentId: string;
-    playMode: PlayMode;
-    colorPreference: "white" | "black" | "random";
-    timer: NodeJS.Timeout;
-    challengerSocket: Socket;
-    opponentSocket: Socket;
-  }
-> = new Map();
+  async saveGameResult(gameId: string, resultString: string) {
+    let result: GameResult = GameResult.inProgress;
+    let winner: string | null = null;
 
-export const challengeUser = async (
-  prisma: PrismaClient,
-  io: SocketIOServer,
-  challengerSocket: CustomSocket,
-  opponentId: string,
-  playMode: PlayMode,
-  colorPreference: "white" | "black" | "random"
-): Promise<{ success: boolean; message: string }> => {
-  if (!challengerSocket.data.userId) {
-    return { success: false, message: "Challenger not identified" };
-  }
-
-  if (!opponentId) {
-    return { success: false, message: "Opponent not identified" };
-  }
-
-  // Check if both users exist
-  const [challenger, opponent] = await Promise.all([
-    prisma.users.findUnique({ where: { id: challengerSocket.data.userId } }),
-    prisma.users.findUnique({ where: { id: opponentId } }),
-  ]);
-
-  if (!challenger || !opponent) {
-    return { success: false, message: "One or both users not found" };
-  }
-
-  // Check if there's already a pending challenge
-  if (pendingChallenges.has(opponentId)) {
-    return { success: false, message: "User already has a pending challenge" };
-  }
-
-  // Find opponent's socket
-  const opponentSocket = Array.from(io.sockets.sockets.values()).find(
-    (socket) => socket.data.userId === opponentId
-  );
-
-  if (!opponentSocket) {
-    return { success: false, message: "Opponent is not online" };
-  }
-
-  // Create a new challenge
-  const timer = setTimeout(() => {
-    const challenge = pendingChallenges.get(opponentId);
-    if (challenge) {
-      challenge.challengerSocket.emit("challengeExpired", {
-        opponentId,
-        message: "Challenge expired",
-      });
-      pendingChallenges.delete(opponentId);
+    if (resultString.includes("White wins")) {
+      result = GameResult.whiteWins;
+      const game = await this.gameSessionRepository.findByGameId(gameId);
+      winner = game?.whitePlayerId || null;
+    } else if (resultString.includes("Black wins")) {
+      result = GameResult.blackWins;
+      const game = await this.gameSessionRepository.findByGameId(gameId);
+      winner = game?.blackPlayerId || null;
+    } else if (resultString.includes("Draw")) {
+      result = GameResult.draw;
     }
-  }, 30000); // 30 seconds timeout
 
-  pendingChallenges.set(opponentId, {
-    challengerId: challengerSocket.data.userId,
-    opponentId,
-    playMode,
-    colorPreference,
-    timer,
-    challengerSocket,
-    opponentSocket,
-  });
-
-  opponentSocket.emit("gameChallenge", {
-    challengerId: challengerSocket.data.userId,
-    challengerName: challenger.username,
-    playMode,
-    colorPreference,
-  });
-
-  return { success: true, message: "Challenge sent successfully" };
-};
-
-export const respondToChallenge = async (
-  prisma: PrismaClient,
-  io: SocketIOServer,
-  opponentSocket: CustomSocket,
-  accept: boolean
-): Promise<{ success: boolean; message: string; gameId?: string }> => {
-  const challenge = Array.from(pendingChallenges.values()).find(
-    (c) => c.opponentSocket.id === opponentSocket.id
-  );
-
-  if (!challenge) {
-    return { success: false, message: "No pending challenge found" };
-  }
-
-  clearTimeout(challenge.timer);
-  pendingChallenges.delete(challenge.opponentId);
-
-  // Notify challenger of the response
-  challenge.challengerSocket.emit("challengeResponse", {
-    opponentId: challenge.opponentId,
-    accepted: accept,
-  });
-
-  if (!accept) {
-    return { success: false, message: "Challenge declined" };
-  }
-
-  // Create a new game session
-  try {
-    const gameId = await createGame(
-      prisma,
-      challenge.challengerId,
-      challenge.playMode,
-      challenge.colorPreference,
-      challenge.opponentId
-    );
-
-    // Notify both players that the game is starting
-    io.to([challenge.challengerSocket.id, challenge.opponentSocket.id]).emit(
-      "gameStarting",
-      {
-        gameId,
-        playMode: challenge.playMode,
-        colorPreference: challenge.colorPreference,
-      }
-    );
-
-    return {
-      success: true,
-      message: "Challenge accepted",
-      gameId,
-    };
-  } catch (error) {
-    console.error("Error creating game session:", error);
-    return {
-      success: false,
-      message: "Failed to create game session",
-    };
-  }
-};
-
-export const getGameMoves = async (gameId: string) => {
-  try {
-    const gameSession = await GameSession.findOne({ gameId });
-    if (!gameSession) {
-      return [];
-    }
-    return gameSession.moves || [];
-  } catch (error) {
-    console.error("Error getting game moves:", error);
-    return [];
-  }
-};
-
-/**
- * Retrieve game history for a specific user without loading moves
- */
-const prisma = new PrismaClient();
-
-export const getUserNameById = async (
-  userId: string
-): Promise<string | null> => {
-  try {
-    const user = await prisma.users.findUnique({
-      where: { id: userId },
-      select: { username: true },
+    await this.gameSessionRepository.update(gameId, {
+      endTime: new Date(),
+      result,
+      winner,
+      status: GameStatus.finished,
     });
-    return user ? user.username : null;
-  } catch (error) {
-    console.error(`Error fetching user name for ID ${userId}:`, error);
+  }
+
+  async calculateGameAccuracy(gameId: string): Promise<void> {
+    const gameSession = await this.gameSessionRepository.findByGameId(gameId);
+    if (!gameSession || !gameSession.moves) return;
+
+    const whiteMoves = gameSession.moves.filter(m => m.playerColor === "w");
+    const blackMoves = gameSession.moves.filter(m => m.playerColor === "b");
+
+    const whiteAccuracy = await this.stockfishService.calculateGameAccuracy(whiteMoves);
+    const blackAccuracy = await this.stockfishService.calculateGameAccuracy(blackMoves);
+
+    await this.gameSessionRepository.update(gameId, {
+      whiteAccuracyPoint: whiteAccuracy,
+      blackAccuracyPoint: blackAccuracy,
+    });
+  }
+
+  async findMatch(
+    userId: string,
+    playMode: PlayMode,
+    colorChoice: "white" | "black" | "random",
+    socketId: string
+  ): Promise<{ gameId: string; matchedPlayer: { userId: string; socketId: string } } | null> {
+    const user = await this.userRepository.findById(userId);
+    if (!user) throw new Error(`User ${userId} not found`);
+
+    const eloRange = 1000;
+    const minElo = user.elo - eloRange;
+    const maxElo = user.elo + eloRange;
+
+    const queuedPlayer: QueuedPlayer = {
+      userId,
+      socketId,
+      playMode,
+      colorChoice,
+      elo: user.elo,
+      timestamp: Date.now(),
+    };
+
+    const existingIndex = this.matchmakingQueue.findIndex(p => p.userId === userId);
+    if (existingIndex !== -1) {
+      this.matchmakingQueue[existingIndex] = queuedPlayer;
+    } else {
+      this.matchmakingQueue.push(queuedPlayer);
+    }
+
+    const matchIndex = this.matchmakingQueue.findIndex(player => {
+      if (player.userId === userId) return false;
+      if (player.playMode !== playMode) return false;
+      if (player.elo < minElo || player.elo > maxElo) return false;
+      if (colorChoice === "white" && player.colorChoice === "white") return false;
+      if (colorChoice === "black" && player.colorChoice === "black") return false;
+      return true;
+    });
+
+    if (matchIndex !== -1) {
+      const matchedPlayer = this.matchmakingQueue[matchIndex];
+      this.matchmakingQueue.splice(matchIndex, 1);
+      const currentPlayerIndex = this.matchmakingQueue.findIndex(p => p.userId === userId);
+      if (currentPlayerIndex !== -1) this.matchmakingQueue.splice(currentPlayerIndex, 1);
+
+      const gameId = uuidv4();
+      await this.gameRepository.create({ id: gameId, userId, status: "active" });
+
+      let whitePlayerId, blackPlayerId, whitePlayerElo, blackPlayerElo;
+      if (colorChoice === "white" || (colorChoice === "random" && matchedPlayer.colorChoice !== "white")) {
+        whitePlayerId = userId; blackPlayerId = matchedPlayer.userId;
+        whitePlayerElo = user.elo; blackPlayerElo = matchedPlayer.elo;
+      } else {
+        whitePlayerId = matchedPlayer.userId; blackPlayerId = userId;
+        whitePlayerElo = matchedPlayer.elo; blackPlayerElo = user.elo;
+      }
+
+      await this.gameSessionRepository.create({
+        gameId,
+        whitePlayerId,
+        blackPlayerId,
+        whitePlayerElo,
+        blackPlayerElo,
+        startTime: new Date(),
+        result: GameResult.inProgress,
+        status: GameStatus.active,
+        playMode,
+        timeLimit: (playMode === PlayMode.bullet ? 1 : playMode === PlayMode.blitz ? 3 : 10) * 60 * 1000,
+        moves: [],
+      });
+
+      return { gameId, matchedPlayer: { userId: matchedPlayer.userId, socketId: matchedPlayer.socketId } };
+    }
+
     return null;
   }
-};
 
-export class ValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ValidationError";
-  }
-}
-
-/**
- * Fetch game history.
- */
-export async function getGameHistories(
-  userId: string,
-  limit = 10,
-  skip = 0
-): Promise<GameHistoryItem[]> {
-  // ----- 1) Validate parameters -----
-  if (!validator.isUUID(userId, 4)) {
-    throw new ValidationError("Invalid userId: must be a valid UUID v4");
-  }
-  if (!validator.isInt(String(limit), { min: 1, max: 1000 })) {
-    throw new ValidationError(
-      "Invalid limit: must be an integer between 1 and 1000"
-    );
-  }
-  if (!validator.isInt(String(skip), { min: 0 })) {
-    throw new ValidationError("Invalid skip: must be a non‑negative integer");
+  removeFromMatchmaking(userId: string) {
+    const index = this.matchmakingQueue.findIndex(p => p.userId === userId);
+    if (index !== -1) this.matchmakingQueue.splice(index, 1);
   }
 
-  try {
-    // ----- 2) Fetch data -----
-    const sessions = await GameSession.find({
-      $or: [{ whitePlayerId: userId }, { blackPlayerId: userId }],
-    })
-      .select("whitePlayerId blackPlayerId startTime endTime result playMode")
-      .sort({ startTime: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean();
+  async updateElo(gameId: string, winnerId: string | null) {
+    const game = await this.gameSessionRepository.findByGameId(gameId);
+    if (!game || !game.whitePlayerId || !game.blackPlayerId) return;
 
-    if (sessions.length === 0) {
-      return [];
-    }
+    const [whiteUser, blackUser] = await Promise.all([
+      this.userRepository.findById(game.whitePlayerId),
+      this.userRepository.findById(game.blackPlayerId),
+    ]);
 
-    // ----- 3) Batch opponent ID → name lookup -----
-    const opponentIds = Array.from(
-      new Set(
-        sessions
-          .map((s) =>
-            s.whitePlayerId === userId ? s.blackPlayerId : s.whitePlayerId
-          )
-          .filter((id): id is string => Boolean(id))
-      )
-    );
+    if (whiteUser && blackUser) {
+      const Ra = whiteUser.elo;
+      const Rb = blackUser.elo;
+      const Ea = 1 / (1 + Math.pow(10, (Rb - Ra) / 400));
+      const Eb = 1 / (1 + Math.pow(10, (Ra - Rb) / 400));
+      const K = 32;
 
-    const users = await prisma.users.findMany({
-      where: { id: { in: opponentIds } },
-      select: { id: true, username: true },
-    });
-    const nameById = new Map<string, string>(
-      users.map((u: { id: string; username: string }) => [u.id, u.username])
-    );
-
-    // ----- 4) Map to the slim DTO -----
-    return sessions.map((s) => {
-      const iAmWhite = s.whitePlayerId === userId;
-      const oppId = iAmWhite ? s.blackPlayerId : s.whitePlayerId;
-      const oppName = oppId ? nameById.get(oppId) || null : null;
-
-      // compute total seconds
-      const startMs = new Date(s.startTime!).getTime();
-      const endMs = new Date(s.endTime!).getTime();
-      const totalSec = Math.floor((endMs - startMs) / 1000);
-
-      // derive result from stored session.result
-      let result: GameHistoryItem["result"];
-      if (s.result === "1/2-1/2") {
-        result = "Draw";
-      } else if (
-        (iAmWhite && s.result === "1-0") ||
-        (!iAmWhite && s.result === "0-1")
-      ) {
-        result = "Victory";
+      let whiteScore, blackScore;
+      if (winnerId === whiteUser.id) {
+        whiteScore = 1; blackScore = 0;
+      } else if (winnerId === blackUser.id) {
+        whiteScore = 0; blackScore = 1;
       } else {
-        result = "Defeat";
+        whiteScore = blackScore = 0.5;
       }
 
-      return {
-        opponentName: oppName,
-        gameMode: s.playMode,
-        totalTime: totalSec,
-        result,
-      };
-    });
-  } catch (err) {
-    // Log the full error for debugging
-    console.error(`Failed to fetch game history for ${userId}`, err);
-    // Convert any non-ValidationError into a generic service error
-    if (err instanceof ValidationError) {
-      throw err;
-    }
-    throw new Error("Internal server error while retrieving game history");
-  }
-}
+      const newWhiteElo = Math.round(Ra + K * (whiteScore - Ea));
+      const newBlackElo = Math.round(Rb + K * (blackScore - Eb));
 
-// Get game analysis data
-export const getGameAnalysis = async (gameId: string) => {
-  try {
-    const gameSession = await GameSession.findOne({ gameId })
-      .select("whiteAccuracyPoint blackAccuracyPoint moves")
-      .lean();
+      await Promise.all([
+        this.userRepository.updateElo(whiteUser.id, newWhiteElo),
+        this.userRepository.updateElo(blackUser.id, newBlackElo),
+      ]);
+
+      try {
+        await this.solidityService.updateAfterGameSolidity(whiteUser.id, newWhiteElo, blackUser.id, newBlackElo);
+      } catch (err) {
+        console.warn("Blockchain ELO update failed:", err);
+      }
+
+      if (winnerId) {
+        const winner = winnerId === whiteUser.id ? whiteUser : blackUser;
+        if (winner.walletAddress) {
+          await RewardPublisher.publishReward({
+            userId: winner.id,
+            username: winner.username,
+            walletAddress: winner.walletAddress,
+            amount: "10",
+            gameId,
+            matchType: 'PvP',
+            gameRewardId: gameId,
+            timestamp: new Date(),
+            transactionType: 'reward',
+          });
+        }
+      }
+
+      return { whiteElo: newWhiteElo, blackElo: newBlackElo };
+    }
+  }
+
+  async challengeUser(io: SocketIOServer, challengerSocket: CustomSocket, opponentId: string, playMode: PlayMode, colorPreference: "white" | "black" | "random") {
+    const challengerId = challengerSocket.data.userId;
+    if (!challengerId) return { success: false, message: "Challenger not identified" };
+
+    const [challenger, opponent] = await Promise.all([
+      this.userRepository.findById(challengerId),
+      this.userRepository.findById(opponentId),
+    ]);
+
+    if (!challenger || !opponent) return { success: false, message: "User(s) not found" };
+
+    const opponentSocket = Array.from(io.sockets.sockets.values()).find(s => s.data.userId === opponentId);
+    if (!opponentSocket) return { success: false, message: "Opponent offline" };
+
+    const timer = setTimeout(() => {
+      this.pendingChallenges.delete(opponentId);
+      challengerSocket.emit("challengeExpired", { opponentId });
+    }, 30000);
+
+    this.pendingChallenges.set(opponentId, { challengerId, timer, challengerSocket, opponentSocket, playMode, colorPreference });
+    opponentSocket.emit("gameChallenge", { challengerId, challengerName: challenger.username, playMode, colorPreference });
+
+    return { success: true, message: "Challenge sent" };
+  }
+
+  async respondToChallenge(io: SocketIOServer, opponentSocket: CustomSocket, accept: boolean) {
+    const challenge = this.pendingChallenges.get(opponentSocket.data.userId!);
+    if (!challenge) return { success: false, message: "No challenge found" };
+
+    clearTimeout(challenge.timer);
+    this.pendingChallenges.delete(opponentSocket.data.userId!);
+
+    challenge.challengerSocket.emit("challengeResponse", { accepted: accept });
+    if (!accept) return { success: false, message: "Declined" };
+
+    const gameId = await this.createGame(challenge.challengerId, challenge.playMode, challenge.colorPreference, opponentSocket.data.userId);
+    io.to([challenge.challengerSocket.id, challenge.opponentSocket.id]).emit("gameStarting", { gameId, playMode: challenge.playMode });
+
+    return { success: true, gameId };
+  }
+
+  async getGameMoves(gameId: string) {
+    const session = await this.gameSessionRepository.findByGameId(gameId);
+    return session?.moves || [];
+  }
+
+  async getGameHistories(userId: string) {
+    return this.gameSessionRepository.findByPlayerId(userId);
+  }
+
+  async getGameAnalysis(gameId: string) {
+    const gameSession = await this.gameSessionRepository.findByGameId(gameId);
     if (!gameSession) {
       throw new Error("Game not found");
     }
@@ -900,51 +391,30 @@ export const getGameAnalysis = async (gameId: string) => {
     if (!gameSession.moves || gameSession.moves.length === 0) {
       throw new Error("No moves found for this game");
     }
+
     const whiteAccuracy = gameSession.whiteAccuracyPoint;
     const blackAccuracy = gameSession.blackAccuracyPoint;
     const moves = gameSession.moves.map((move) => ({
       moveNumber: move.moveNumber,
       move: move.move,
       evaluation: move.evaluation,
-      bestmove: move.bestmove.split(" ")[0],
+      bestmove: move.bestmove ? move.bestmove.split(" ")[0] : '',
       mate: move.mate,
       continuation: move.continuation,
-      playerColor: move.playerColor,
       classification: move.classification,
     }));
+
     return {
-      gameId: gameSession.gameId,
       whiteAccuracy,
       blackAccuracy,
-      moves,
+      moves
     };
-  } catch (error) {
-    console.error("Error retrieving game analysis:", error);
-    throw error;
   }
-};
+}
 
-/**
- * Retrieve moves for a specific game when user clicks on a game in history
- */
-export const retrieveGameMoves = async (gameId: string) => {
-  if (!validator.isUUID(gameId, 4)) {
-    throw new ValidationError("Invalid gameId: must be a valid UUID v4");
+export class ValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ValidationError";
   }
-
-  try {
-    const game = await GameSession.findOne({ gameId });
-    if (!game) {
-      throw new Error(`Game with ID ${gameId} not found`);
-    }
-
-    return {
-      gameId: game.gameId,
-      moves: game.moves,
-    };
-  } catch (err) {
-    if (err instanceof ValidationError) throw err;
-    console.error(`Error retrieving moves for game ${gameId}:`, err);
-    throw new Error("Failed to retrieve game moves. Please try again later.");
-  }
-};
+}

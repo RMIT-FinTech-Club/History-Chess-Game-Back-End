@@ -54,4 +54,24 @@ export default async function walletRoutes(fastify: FastifyInstance) {
 			return walletController.getPendingTransactions(request, reply);
 		}
 	});
+
+	/**
+	 * TRANSACTIONS HISTORY ENDPOINT
+	 */
+	fastify.get('/wallet/transactions', {
+		preHandler: [authenticate],
+		handler: async (request: FastifyRequest, reply: FastifyReply) => {
+			return walletController.getTransactions(request, reply);
+		}
+	});
+
+	/**
+	 * SYNC TRANSACTIONS ENDPOINT
+	 */
+	fastify.post('/wallet/sync-transactions', {
+		preHandler: [authenticate],
+		handler: async (request: FastifyRequest, reply: FastifyReply) => {
+			return walletController.syncTransactions(request, reply);
+		}
+	});
 }

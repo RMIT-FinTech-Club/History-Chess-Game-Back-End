@@ -20,13 +20,13 @@ const mongodbPlugin: FastifyPluginAsync = fp(async (fastify: FastifyInstance) =>
         fastify.decorate('mongo', mongoose);
 
         // Add a hook to close the Mongoose connection on Fastify server close
-        fastify.addHook('onClose', async (instance) => {
+        fastify.addHook('onClose', async (instance: any) => {
             await (instance as FastifyInstance & { mongo: MongoDBPlugin }).mongo.mongoose.connection.close();
         });
 
         fastify.log.info('MongoDB connected successfully with Mongoose');
     } catch (error: unknown) {
-        fastify.log.error('MongoDB connection failed with Mongoose:', error);
+        fastify.log.error(error, 'MongoDB connection failed with Mongoose:');
         if (error instanceof Error) {
             throw new Error(`Failed to connect to MongoDB with Mongoose: ${error.message}`);
         } else {

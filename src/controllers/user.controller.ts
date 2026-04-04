@@ -1,435 +1,121 @@
-import { FastifyInstance, FastifyRequest, FastifyReply, RouteGenericInterface } from "fastify";
-import { UserService, CreateUserInput, UpdateUserInput, UpdateProfileInput } from "../services/user.service";
-//import { uploadController } from "../controllers/upload.controller";
-import uiBasePath from "../types/uiPathConfig";
+import { FastifyReply, FastifyRequest } from 'fastify';
+import { BaseController } from './BaseController';
+import { UserService } from '../services/user.service';
+import { loginSchema, signupSchema, updateProfileSchema } from '../validators/user.schema';
+import { config } from '../configs/unifiedConfig';
 
-interface IdParams {
-  id: string;
-}
-
-interface QueryParams {
-  limit?: number;
-  offset?: number;
-}
-
-interface RegisterRequest {
-  Body: CreateUserInput;
-}
-
-interface LoginRequest {
-  Body: { identifier: string; password: string };
-}
-
-interface RequestPasswordReset {
-  Body: { email: string };
-}
-
-interface ResetPasswordRequest {
-  Body: { email: string; resetCode: string; newPassword: string };
-}
-
-interface UpdatePasswordRequest {
-  Body: { oldPassword: string; newPassword: string };
-}
-
-interface GoogleCallbackRequest {
-  Querystring: { code: string; state: string };
-}
-
-interface CompleteGoogleLoginRequest {
-  Body: { tempToken: string; username: string };
-}
-
-interface CheckAuthTypeRequest {
-  Body: { email: string };
-}
-
-interface VerifyResetCodeRequest {
-  Body: { email: string; resetCode: string };
-}
-
-interface ProfileRequest extends RouteGenericInterface {
-  Headers: { authorization?: string };
-  authUser?: { id: string; username: string; googleAuth: boolean };
-}
-
-interface ProfileUpdateRoute extends RouteGenericInterface {
-  Body: {
-    username?: string;
-    avatarUrl?: string | null;
-  };
-}
-
-interface UpdateProfileRequest {
-  Params: IdParams;
-  Body: UpdateProfileInput;
-}
-
-export default class UserController {
-  private userService: UserService;
-
-  constructor(fastify: FastifyInstance) {
-    this.userService = new UserService(fastify);
+export class UserController extends BaseController {
+  constructor(private readonly userService: UserService) {
+    super();
   }
 
-  async createUser(
-    request: FastifyRequest<RegisterRequest>,
-    reply: FastifyReply
-  ): Promise<void> {
+  async login(req: FastifyRequest, res: FastifyReply) {
     try {
-      const response = await this.userService.createUser(request.body);
-      reply.status(201).send(response);
-    } catch (error: unknown) {
-      request.log.error(error);
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      if (message.includes('username')) {
-        reply.status(409).send({ message: 'This username is already taken (case-insensitive). Please choose a different username.' });
-      } else if (message.includes('email')) {
-        reply.status(409).send({ message: 'This email is already registered. Please use a different email.' });
-      } else {
-        reply.status(500).send({ message: 'Internal server error' });
-      }
+      const input = loginSchema.parse(req.body);
+      const result = await this.userService.login(input.identifier, input.password, input.token);
+      this.handleSuccess(res, result);
+    } catch (error) {
+      this.handleError(error, res, 'login');
     }
   }
 
-  async getUserById(
-    request: FastifyRequest<{ Params: IdParams }>,
-    reply: FastifyReply
-  ): Promise<void> {
-    const { id } = request.params;
-    const response = await this.userService.getUserById(id);
-
-    if (!response) {
-      reply.status(404).send({ message: 'User not found' });
-    } else {
-      reply.status(200).send(response);
+  async signup(req: FastifyRequest, res: FastifyReply) {
+    try {
+      const input = signupSchema.parse(req.body);
+      const result = await this.userService.createUser(input as any);
+      this.handleSuccess(res, result, 201);
+    } catch (error) {
+      this.handleError(error, res, 'signup');
     }
   }
 
-  async getAllUsers(
-    request: FastifyRequest<{ Querystring: QueryParams }>,
-    reply: FastifyReply
-  ): Promise<void> {
-    const limit = request.query.limit || 10;
-    const offset = request.query.offset || 0;
-
-    const response = await this.userService.getAllUsers(limit, offset);
-    reply.status(200).send(response);
-  }
-
-  async getProfile(
-    request: FastifyRequest<ProfileRequest>,
-    reply: FastifyReply
-  ): Promise<void> {
+  async updateProfile(req: FastifyRequest, res: FastifyReply) {
     try {
-      const userId = request.authUser?.id;
-
-      if (!userId) {
-        reply.status(401).send({ message: 'Authentication required' });
-        return;
-      }
-
-      const response = await this.userService.getUserById(userId);
-
-      if (!response) {
-        reply.status(404).send({ message: 'User not found' });
-        return;
-      }
-
-      reply.status(200).send(response);
-    } catch (error: unknown) {
-      request.log.error(error);
-      reply.status(500).send({ message: 'Internal server error' });
+      const input = updateProfileSchema.parse(req.body);
+      const userId = (req.user as any)?.id;
+      if (!userId) throw new Error('Unauthorized');
+      
+      const result = await this.userService.updateProfile(userId, input);
+      this.handleSuccess(res, result);
+    } catch (error) {
+      this.handleError(error, res, 'updateProfile');
     }
   }
 
-  async updateUser(
-    request: FastifyRequest<{ Params: IdParams; Body: UpdateUserInput }>,
-    reply: FastifyReply
-  ): Promise<void> {
-    const { id } = request.params;
-
+  async getMe(req: FastifyRequest, res: FastifyReply) {
     try {
-      const response = await this.userService.updateUser(id, request.body);
-
-      if (!response) {
-        reply.status(404).send({ message: 'User not found' });
-        return;
-      }
-
-      reply.status(200).send(response);
-    } catch (error: unknown) {
-      request.log.error(error);
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      if (message.includes('username')) {
-        reply.status(409).send({ message: 'This username is already taken (case-insensitive). Please choose a different username.' });
-      } else if (message.includes('email')) {
-        reply.status(409).send({ message: 'This email is already registered. Please use a different email.' });
-      } else {
-        reply.status(500).send({ message: 'Internal server error' });
-      }
+      const userId = (req.user as any)?.id;
+      if (!userId) throw new Error('Unauthorized');
+      
+      const result = await this.userService.getUserById(userId);
+      this.handleSuccess(res, result);
+    } catch (error) {
+      this.handleError(error, res, 'getMe');
     }
   }
 
-  async updateProfile(
-    request: FastifyRequest<UpdateProfileRequest>,
-    reply: FastifyReply
-  ): Promise<void> {
-    const { id } = request.params;
-    const { username, avatarUrl } = request.body;
-
+  async googleAuth(req: FastifyRequest, res: FastifyReply) {
     try {
-      const response = await this.userService.updateProfile(id, { username, avatarUrl });
-
-      if (!response) {
-        reply.status(404).send({ message: 'User not found' });
-        return;
-      }
-
-      reply.status(200).send(response);
-    } catch (error: unknown) {
-      request.log.error(error);
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      if (message.includes('Username already taken')) {
-        reply.status(409).send({ message: 'This username already exists, please choose another username.' });
-      } else {
-        reply.status(500).send({ message: 'Internal server error' });
-      }
+      const { state } = req.query as { state: string };
+      const url = await this.userService.googleAuth(state);
+      res.redirect(url);
+    } catch (error) {
+      this.handleError(error, res, 'googleAuth');
     }
   }
 
-  async updateAuthenticatedProfile(
-    request: FastifyRequest<ProfileUpdateRoute>,
-    reply: FastifyReply
-  ): Promise<void> {
+  async googleCallback(req: FastifyRequest, res: FastifyReply) {
     try {
-      const userId = request.authUser?.id;
-      console.log('Extracted userId:', userId);
-
-      if (!userId) {
-        console.log('No userId found, returning 401');
-        reply.status(401).send({ message: 'Authentication required' });
-        return;
-      }
-
-      const { username, avatarUrl } = request.body;
-      console.log('Extracted from body - username:', username, 'avatarUrl:', avatarUrl);
-
-      if (username === undefined && avatarUrl === undefined) {
-        console.log('No valid fields provided in request');
-        reply.status(400).send({ message: 'At least one field (username or avatarUrl) must be provided' });
-        return;
-      }
-
-      const updateData: UpdateProfileInput = {};
-      if (username !== undefined) updateData.username = username;
-      if (avatarUrl !== undefined) updateData.avatarUrl = avatarUrl;
-      console.log('Update data to send to service:', updateData);
-
-      console.log('Calling userService.updateProfile...');
-      const response = await this.userService.updateProfile(userId, updateData);
-      console.log('Service response:', response);
-
-      if (!response) {
-        console.log('No updated user returned, sending 404');
-        reply.status(404).send({ message: 'User not found' });
-        return;
-      }
-
-      console.log('Sending success response');
-      reply.status(200).send(response);
-    } catch (error: unknown) {
-      console.log('=== ERROR IN UPDATE PROFILE ===');
-      console.log('Error:', error);
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      console.log('Error message:', message);
-      console.log('Error stack:', error instanceof Error ? error.stack : undefined);
-      request.log.error(error);
-
-      if (message.includes('Username already taken')) {
-        reply.status(409).send({ message: 'This username already exists, please choose another username.' });
-      } else {
-        reply.status(500).send({ message: 'Internal server error', error: message });
-      }
-    }
-  }
-
-  async deleteUser(
-    request: FastifyRequest<{ Params: IdParams }>,
-    reply: FastifyReply
-  ): Promise<void> {
-    try {
-      const { id } = request.params;
-      const deleted = await this.userService.deleteUser(id);
-
-      if (!deleted) {
-        reply.status(404).send({ message: 'User not found' });
-      } else {
-        reply.status(200).send({ message: 'User deleted successfully' });
-      }
-    } catch (error: unknown) {
-      request.log.error(error);
-      reply.status(500).send({ message: 'Internal server error' });
-    }
-  }
-
-  async login(
-    request: FastifyRequest<LoginRequest>,
-    reply: FastifyReply
-  ): Promise<void> {
-    try {
-      const { identifier, password } = request.body;
-      const response = await this.userService.login(identifier, password);
-      reply.status(200).send(response);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      reply.status(401).send({ message });
-    }
-  }
-
-  async requestPasswordReset(
-    request: FastifyRequest<RequestPasswordReset>,
-    reply: FastifyReply
-  ): Promise<void> {
-    try {
-      const { email } = request.body;
-      await this.userService.requestPasswordReset(email);
-      reply.status(200).send({ message: "Verification code sent successfully" });
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      reply.status(400).send({ message });
-    }
-  }
-
-  async resetPassword(
-    request: FastifyRequest<ResetPasswordRequest>,
-    reply: FastifyReply
-  ): Promise<void> {
-    try {
-      const { email, resetCode, newPassword } = request.body;
-      const response = await this.userService.resetPassword(email, resetCode, newPassword);
-      reply.status(200).send(response);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      reply.status(400).send({ message });
-    }
-  }
-
-  async updatePassword(
-    request: FastifyRequest<UpdatePasswordRequest>,
-    reply: FastifyReply
-  ): Promise<void> {
-    try {
-      const { oldPassword, newPassword } = request.body;
-      const { id } = request.authUser!;
-      await this.userService.updatePassword(id, oldPassword, newPassword);
-      reply.status(200).send({ message: "Password updated successfully" });
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      reply.status(400).send({ message });
-    }
-  }
-
-  async googleCallback(
-    request: FastifyRequest<GoogleCallbackRequest>,
-    reply: FastifyReply
-  ): Promise<void> {
-    try {
-      const { code, state } = request.query;
+      const { code, state } = req.query as { code: string, state: string };
       const result = await this.userService.googleCallback(code, state);
+      
+      let script = '';
       if ('tempToken' in result) {
-        reply.type('text/html').send(`
-          <script>
-            window.opener.postMessage({
-              type: 'google-auth-prompt-username',
-              email: '${result.email}',
-              tempToken: '${result.tempToken}'
-            }, '${uiBasePath}');
-            window.close();
-          </script>
-        `);
+        script = `
+          window.opener.postMessage({
+            type: 'google-auth-prompt-username',
+            email: '${result.email}',
+            tempToken: '${result.tempToken}'
+          }, '*');
+          window.close();
+        `;
       } else {
-        reply.type('text/html').send(`
-          <script>
-            window.opener.postMessage({
-              type: 'google-auth',
-              token: '${result.token}',
-              userId: '${result.id}',
-              username: '${result.username}',
-              email: '${result.email}',
-              avatarUrl: '${result.avatarUrl || ''}'
-            }, '${uiBasePath}');
-            window.close();
-          </script>
-        `);
+        script = `
+          window.opener.postMessage({
+            type: 'google-auth',
+            token: '${result.token}',
+            userId: '${result.id}',
+            username: '${result.username}',
+            email: '${result.email}',
+            avatarUrl: '${result.avatarUrl || ""}',
+            role: '${result.role}'
+          }, '*');
+          window.close();
+        `;
       }
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      reply.type('text/html').send(`
-        <script>
+
+      res.type('text/html').send(`<html><body><script>${script}</script></body></html>`);
+    } catch (error: any) {
+      const errorMessage = error.message || 'Google Auth Failed';
+      res.type('text/html').send(`
+        <html><body><script>
           window.opener.postMessage({
             type: 'google-auth-error',
-            error: '${message}'
-          }, '${uiBasePath}');
+            error: '${errorMessage.replace(/'/g, "\\'")}'
+          }, '*');
           window.close();
-        </script>
+        </script></body></html>
       `);
     }
   }
 
-  async completeGoogleLogin(
-    request: FastifyRequest<CompleteGoogleLoginRequest>,
-    reply: FastifyReply
-  ): Promise<void> {
+  async completeGoogleLogin(req: FastifyRequest, res: FastifyReply) {
     try {
-      const { tempToken, username } = request.body;
-      const response = await this.userService.completeGoogleLogin(tempToken, username);
-      reply.status(200).send(response);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      reply.status(400).send({ message });
-    }
-  }
-
-  async checkAuthType(
-    request: FastifyRequest<CheckAuthTypeRequest>,
-    reply: FastifyReply
-  ): Promise<void> {
-    try {
-      const { email } = request.body;
-      const result = await this.userService.checkAuthType(email);
-      reply.status(200).send(result);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      reply.status(400).send({ message });
-    }
-  }
-
-  async verifyResetCode(
-    request: FastifyRequest<VerifyResetCodeRequest>,
-    reply: FastifyReply
-  ): Promise<void> {
-    try {
-      const { email, resetCode } = request.body;
-      await this.userService.verifyResetCode(email, resetCode);
-      reply.status(200).send({ message: "Verification code is valid" });
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      reply.status(400).send({ message });
-    }
-  }
-
-  async googleAuth(
-    request: FastifyRequest<{ Querystring: { state: string } }>,
-    reply: FastifyReply
-  ): Promise<void> {
-    try {
-      const { state } = request.query;
-      const authUrl = await this.userService.googleAuth(state);
-      reply.redirect(authUrl);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      reply.status(500).send({ message });
+      const { tempToken, username } = req.body as { tempToken: string, username: string };
+      const result = await this.userService.completeGoogleLogin(tempToken, username);
+      this.handleSuccess(res, result);
+    } catch (error) {
+      this.handleError(error, res, 'completeGoogleLogin');
     }
   }
 }

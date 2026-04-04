@@ -10,7 +10,7 @@ export interface DBConfig {
 // Config database connection
 export const dbConfig: DBConfig = {
     mongodb: {
-        url: process.env.MONGODB_URL || 'mongodb://localhost:27017',
+        url: process.env.MONGODB_URL || process.env.MONGODB_URI || 'mongodb://localhost:27017',
         database: process.env.MONGODB_DB || 'ftc_history_chess_game'
     },
     neon: {

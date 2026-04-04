@@ -75,11 +75,25 @@ model MarketplaceListings {
     id              String        @id @default(auto()) @map("_id") @db.ObjectId
     nftId           String
     sellerId        String
+    listingType     String        @default("AUCTION")
     price           Float
+    currentBid      Float?
+    highestBidderId String?
     status          ListingStatus
     startTime       DateTime      @default(now())
-    terminateTime   DateTime?
+    endTime         DateTime?
+    nftDetails      Json?
     transactionHash String?
+    bids            AuctionBid[]
+}
+
+model AuctionBid {
+    id              String              @id @default(auto()) @map("_id") @db.ObjectId
+    listingId       String              @db.ObjectId
+    bidderId        String
+    amount          Float
+    createdAt       DateTime            @default(now())
+    listing         MarketplaceListings @relation(fields: [listingId], references: [id])
 }
 
 enum ListingStatus {
@@ -87,6 +101,7 @@ enum ListingStatus {
     SOLD
     CANCELLED
     EXPIRED
+    ENDED
 }
 
 model GameHistory {
@@ -139,6 +154,21 @@ model Moves {
     result     MoveResult?
     game       Games       @relation("GameMoves", fields: [gameId], references: [id])
     states     States[]    @relation("MoveStates")
+
+    fen                     String?
+    moveNumber              Int?
+    from                    String?
+    to                      String?
+    promotion               String?
+    playerColor             String?
+    evaluation              Float?
+    bestmove                String?
+    classification          String?
+    moveExpectedPoints      Float?
+    bestMoveExpectedPoints  Float?
+    expectedPointsLost      Float?
+    mate                    Int?
+    continuation            String?
 }
 
 enum MoveResult {
@@ -226,4 +256,35 @@ model FailedBlockchainTransaction {
 
     @@index([status, nextRetryAt])
     @@index([userId, firstAttemptAt])
+}
+
+model MarketplaceItem {
+    id                String   @id @default(auto()) @map("_id") @db.ObjectId
+    name              String
+    description       String
+    imageUrl          String
+    rarity            String
+    dynasty           String
+    price             Float
+    quantity          Int
+    soldCount         Int      @default(0)
+    category          String
+    transactionHash   String?
+    isActive          Boolean  @default(true)
+    createdAt         DateTime @default(now())
+    historicalContext Json?
+}
+
+model TransactionHistory {
+    id              String   @id @default(auto()) @map("_id") @db.ObjectId
+    userId          String
+    type            String
+    amount          Float
+    currency        String
+    description     String
+    transactionHash String?
+    status          String
+    metadata        Json?
+    createdAt       DateTime @default(now())
+    explorerUrl     String?
 }

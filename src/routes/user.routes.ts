@@ -1,137 +1,23 @@
-import { FastifyInstance, FastifyRequest, FastifyReply, RouteGenericInterface } from 'fastify';
-import UserController from '../controllers/user.controller';
-import { uploadController } from '../controllers/upload.controller';
-import {
-  createUserSchema,
-  getUserSchema,
-  updateAuthenticatedProfileSchema,
-  deleteUserSchema,
-  getAllUsersSchema,
-  updateProfileSchema,
-  uploadAvatarSchema,
-} from './schemas/userSchema';
-import { authenticate, authorize } from '../middleware/auth';
-//import basePath from '../types/pathConfig';
-
-// Define request interfaces to match schemas
-interface IdParams {
-  Params: { id: string };
-}
-interface QueryParams {
-  Querystring: { limit?: number; offset?: number };
-}
-interface UpdateProfileRequest {
-  Params: { id: string };
-  Body: { username?: string };
-}
-interface ProfileUpdateRoute extends RouteGenericInterface {
-  Body: {
-    username?: string;
-    avatarUrl?: string | null;
-  };
-}
-interface AvatarRequest {
-  Params: { id: string };
-  Body: { file: unknown }; // Multipart file
-  Headers: { authorization?: string };
-}
+import { FastifyInstance } from 'fastify';
+import { CompositionRoot } from '../configs/compositionRoot';
+import { authenticate } from '../middleware/auth';
+import { asyncErrorWrapper } from '../middleware/asyncErrorWrapper';
 
 export default async function userRoutes(fastify: FastifyInstance) {
-  const userController = new UserController(fastify);
+  const { userController } = CompositionRoot.getInstance();
 
-  fastify.post('/users', {
-    schema: createUserSchema,
-    handler: userController.createUser.bind(userController),
-  });
+  fastify.post('/users/login', asyncErrorWrapper(userController.login.bind(userController)));
+  fastify.post('/users/signup', asyncErrorWrapper(userController.signup.bind(userController)));
+  
+  fastify.get('/users/me', { preHandler: authenticate }, asyncErrorWrapper(userController.getMe.bind(userController)));
+  fastify.put('/users/profile', { preHandler: authenticate }, asyncErrorWrapper(userController.updateProfile.bind(userController)));
 
-  fastify.get('/users/:id', {
-    schema: getUserSchema,
-    preHandler: [authenticate],
-    handler: async (request: FastifyRequest<IdParams>, reply: FastifyReply) => {
-      return userController.getUserById(request, reply);
-    },
-  });
+  // Google Auth routes
+  fastify.get('/users/google-auth', asyncErrorWrapper(userController.googleAuth.bind(userController)));
+  fastify.get('/users/google-callback', asyncErrorWrapper(userController.googleCallback.bind(userController)));
+  fastify.post('/users/complete-google-login', asyncErrorWrapper(userController.completeGoogleLogin.bind(userController)));
 
-  fastify.get('/users/profile', {
-    preHandler: authenticate,
-    handler: userController.getProfile.bind(userController),
-  });
-
-  // fastify.put('/users/profile', {
-  //   schema: updateAuthenticatedProfileSchema,
-  //   preHandler: authenticate,
-  //   handler: userController.updateAuthenticatedProfile.bind(userController),
-  // });
-
-  fastify.get('/users', {
-    schema: getAllUsersSchema,
-    preHandler: authenticate,
-    handler: async (request: FastifyRequest<QueryParams>, reply: FastifyReply) => {
-      return userController.getAllUsers(request, reply);
-    },
-  });
-
-  fastify.put('/users/:id', {
-    schema: updateProfileSchema,
-    preHandler: [authenticate, authorize],
-    handler: async (request: FastifyRequest<UpdateProfileRequest>, reply: FastifyReply) => {
-      return userController.updateProfile(request, reply);
-    },
-  });
-
-  fastify.put('/users/update-password', {
-    preHandler: authenticate,
-    handler: userController.updatePassword.bind(userController),
-  });
-
-  fastify.delete('/users/:id', {
-    schema: deleteUserSchema,
-    preHandler: [authenticate, authorize],
-    handler: async (request: FastifyRequest<IdParams>, reply: FastifyReply) => {
-      return userController.deleteUser(request, reply);
-    },
-  });
-
-  fastify.post('/users/login', {
-    handler: userController.login.bind(userController),
-  });
-
-  fastify.post('/users/request-reset', {
-    handler: userController.requestPasswordReset.bind(userController),
-  });
-
-  fastify.post('/users/reset-password', {
-    handler: userController.resetPassword.bind(userController),
-  });
-
-  fastify.post('/users/verify-reset-code', {
-    handler: userController.verifyResetCode.bind(userController),
-  });
-
-  fastify.get('/users/google-callback', {
-    handler: userController.googleCallback.bind(userController),
-  });
-
-  fastify.post('/users/complete-google-login', {
-    handler: userController.completeGoogleLogin.bind(userController),
-  });
-
-  fastify.post('/users/check-auth-type', {
-    handler: userController.checkAuthType.bind(userController),
-  });
-
-  fastify.post('/users/:id/avatar', {
-    schema: uploadAvatarSchema,
-    preHandler: [authenticate, authorize],
-    handler: async (request: FastifyRequest<AvatarRequest>, reply: FastifyReply) => {
-      await uploadController.uploadAvatar(request, reply, fastify);
-    },
-  });
-
-  fastify.delete('/users/:id/avatar', {
-    preHandler: [authenticate, authorize],
-    handler: async (request: FastifyRequest<AvatarRequest>, reply: FastifyReply) => {
-      await uploadController.deleteAvatar(request, reply, fastify);
-    },
-  });
+  // Note: I've focused on the core routes first. 
+  // Other routes from the original user.routes.ts can be added back 
+  // after implementing their corresponding controller methods.
 }

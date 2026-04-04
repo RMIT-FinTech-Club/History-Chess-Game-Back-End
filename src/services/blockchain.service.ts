@@ -1,5 +1,4 @@
 import Web3 from 'web3';
-import type { AbiItem } from 'web3-utils';
 import { PlayerBalance } from '../models/playerBalance.ts';
 import { GameReward } from '../models/gameRewards.ts';
 import mongoose from 'mongoose';
@@ -33,7 +32,7 @@ interface IFailedBlockchainTransaction {
 }
 
 // GameCoin contract ABI functions
-const GAME_COIN_ABI: AbiItem[] = [
+const GAME_COIN_ABI: any[] = [
 	{
 		"inputs": [{ "name": "player", "type": "address" }],
 		"name": "rewardPvPWin",
@@ -67,23 +66,20 @@ const GAME_COIN_ABI: AbiItem[] = [
 	}
 ];
 
+import { config } from '../configs/unifiedConfig';
+
 export class BlockchainService {
 	private web3: Web3;
 	private contract: any;
 	private account: string;
 
 	constructor() {
-		// Initialize Web3 with RPC url from environment
-		this.web3 = new Web3(process.env.RPC_URL || 'http://127.0.0.1:8545');
-
-		// Create contract instance 
+		this.web3 = new Web3(config.blockchain.rpcUrl);
 		this.contract = new this.web3.eth.Contract(
 			GAME_COIN_ABI,
-			process.env.GAME_COIN_CONTRACT_ADDRESS
+			config.blockchain.contractAddress
 		);
-
-		// Set up the account that will send transactions
-		this.account = process.env.DEPLOYER_PRIVATE_KEY!;
+		this.account = config.blockchain.deployerPrivateKey!;
 		this.web3.eth.accounts.wallet.add(this.account);
 	}
 

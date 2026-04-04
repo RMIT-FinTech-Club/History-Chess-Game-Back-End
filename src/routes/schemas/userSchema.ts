@@ -8,8 +8,14 @@ export const userProperties = {
   avatarUrl: { type: 'string', nullable: true },
   language: { type: 'string', enum: ['en', 'vi'] },
   elo: { type: 'integer' },
+  level: { type: 'integer' },
+  dynasty: { type: 'string' },
+  dynastyLevel: { type: 'integer' },
+  dynastyXp: { type: 'integer' },
+  role: { type: 'string' },
   createdAt: { type: 'string', format: 'date-time' },
   updatedAt: { type: 'string', format: 'date-time' },
+  googleAuth: { type: 'boolean' },
 };
 
 export const userResponseSchema = {
@@ -23,8 +29,14 @@ export const userResponseSchema = {
     avatarUrl: { type: 'string', nullable: true },
     language: { type: 'string', enum: ['en', 'vi'] },
     elo: { type: 'integer' },
+    level: { type: 'integer' },
+    dynasty: { type: 'string' },
+    dynastyLevel: { type: 'integer' },
+    dynastyXp: { type: 'integer' },
+    role: { type: 'string' },
     createdAt: { type: 'string', format: 'date-time' },
     updatedAt: { type: 'string', format: 'date-time' },
+    googleAuth: { type: 'boolean' },
   },
   additionalProperties: false,
 };
@@ -42,11 +54,12 @@ export const createUserSchema = {
   tags: ['user'],
   body: {
     type: 'object',
-    required: ['username', 'email', 'password'],
+    required: ['username', 'email', 'password', 'verificationCode'],
     properties: {
       username: { type: 'string', minLength: 3, maxLength: 50, pattern: '^[a-zA-Z0-9]+$' },
       email: { type: 'string', format: 'email' },
       password: { type: 'string', minLength: 9 },
+      verificationCode: { type: 'string', minLength: 6, maxLength: 6 },
       walletAddress: { type: 'string', nullable: true },
     },
     additionalProperties: false,
@@ -139,7 +152,7 @@ export const updateAuthenticatedProfileSchema = {
   tags: ['user', 'profile'],
   summary: 'Update authenticated user profile',
   description: 'Updates the authenticated user profile information (no user ID required)',
-  security: [{ bearerAuth: [] }],
+  security: [{ bearerAuth: [] as string[] }],
   body: {
     type: 'object',
     properties: {
@@ -282,6 +295,32 @@ export const uploadAvatarSchema = {
       properties: {
         message: { type: 'string' },
         error: { type: 'string' },
+      },
+    },
+  },
+};
+
+export const signupVerificationSchema = {
+  tags: ['user'],
+  body: {
+    type: 'object',
+    required: ['email'],
+    properties: {
+      email: { type: 'string', format: 'email' },
+    },
+    additionalProperties: false,
+  },
+  response: {
+    200: {
+      type: 'object',
+      properties: {
+        message: { type: 'string' },
+      },
+    },
+    400: {
+      type: 'object',
+      properties: {
+        message: { type: 'string' },
       },
     },
   },

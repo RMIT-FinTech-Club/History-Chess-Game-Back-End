@@ -5,6 +5,8 @@ import { PlayerBalance } from '../models/playerBalance.ts';
 import { postgresPrisma } from '../configs/prismaClient.ts';
 import { RewardPublisher, RewardMessage } from '../queues/publishers/reward.publisher.ts';
 import mongoose from 'mongoose';
+import { BlockchainService } from './blockchain.service.ts';
+import { TransactionHistory } from '../models/TransactionHistory.ts';
 
 
 export class GameRewardHandler {
@@ -79,10 +81,21 @@ export class GameRewardHandler {
 			console.log(`✅ GameReward created: ${gameRewardId}`);
 
 			// ============================================
-			// PHASE 2: OPTIMISTIC UI UPDATE (Instant)
+			// PHASE 2: OPTIMISTIC UI / DB UPDATE (Instant)
 			// ============================================
-			console.log('\n⚡ PHASE 2: Optimistic UI update...');
+			console.log('\n⚡ PHASE 2: Optimistic UI & DB update...');
 
+			// 2a. Update MongoDB (Optimistic)
+			const blockchainService = new BlockchainService();
+			await blockchainService.updateBalanceOptimistic(
+				gameSession.winner,
+				rewardAmount,
+				matchType,
+				gameRewardId,
+				winner.walletAddress
+			);
+
+			// 2b. Notify via Socket.io
 			if (io) {
 				io.to(gameSession.winner).emit('balanceUpdate', {
 					userId: gameSession.winner,
@@ -94,6 +107,20 @@ export class GameRewardHandler {
 
 				console.log(`✅ Instant UI notification sent to ${winner.username}`);
 			}
+
+			// 2c. Log to Transaction History (For frontend table)
+			await TransactionHistory.create({
+				userId: gameSession.winner,
+				type: 'GAME_REWARD',
+				amount: parseFloat(Web3.utils.fromWei(rewardAmount, 'ether')),
+				currency: 'coins',
+				description: `Game Reward for ${matchType} match`,
+				status: 'pending',
+				metadata: {
+					gameId: gameSession.gameId,
+					gameRewardId: gameRewardId
+				}
+			});
 
 			// ============================================
 			// PHASE 3: PUBLISH TO RABBITMQ (Async)

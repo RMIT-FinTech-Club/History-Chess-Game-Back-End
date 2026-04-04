@@ -14,6 +14,11 @@ model users {
     hashedPassword String
     walletAddress  String?  @unique // migrate to the Wallet model
     elo            Int      @default(400)
+    level          Int      @default(1)
+    dynasty        String   @default("Đinh")
+    dynastyLevel   Int      @default(1)
+    dynastyXp      Int      @default(0)
+    role           String   @default("user")
     avatarUrl      String?
     language       String   @default("en")
     createdAt      DateTime @default(now())
@@ -29,6 +34,7 @@ model wallet {
     id        String   @id @default(uuid())
     address   String   @unique
     userId    String   @unique
+    balance   Float    @default(0)
     user      users    @relation(fields: [userId], references: [id])
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt

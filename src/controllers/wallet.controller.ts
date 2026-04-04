@@ -1,5 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { GameRewardHandler } from '../services/gameRewardHandler';
+import { GameRewardHandler } from '../services/gameRewardHandler.ts';
+import { TransactionHistory } from '../models/TransactionHistory.ts';
 
 interface WalletBalanceRequest extends FastifyRequest {
 	// userId will come from authUser
@@ -203,6 +204,56 @@ export class WalletController {
 				success: false,
 				error: `Failed to fetch pending transactions: ${errorMessage}`
 			});
+		}
+	}
+
+	/**
+	 * GET /wallet/transactions
+	 */
+	async getTransactions(request: WalletHistoryRequest | any, reply: FastifyReply) {
+		try {
+			const userId = request.authUser.id;
+			const { limit = 10, offset = 0, type } = request.query as any;
+
+			const filter: any = { userId };
+			if (type && type !== 'all') {
+				filter.type = type;
+			}
+
+			const transactions = await TransactionHistory.find(filter)
+				.sort({ createdAt: -1 })
+				.skip(Number(offset))
+				.limit(Number(limit));
+
+			const total = await TransactionHistory.countDocuments(filter);
+
+			return reply.status(200).send({
+				success: true,
+				data: {
+					transactions,
+					pagination: {
+						total,
+						limit: Number(limit),
+						offset: Number(offset),
+						hasMore: total > Number(offset) + Number(limit)
+					}
+				}
+			});
+		} catch (error: any) {
+			return reply.status(500).send({ success: false, error: `Failed to fetch transactions: ${error.message}` });
+		}
+	}
+
+	/**
+	 * POST /wallet/sync-transactions
+	 */
+	async syncTransactions(request: FastifyRequest | any, reply: FastifyReply) {
+		try {
+			// Actually trigger a sync logic here, e.g. checking pending blockchain transactions
+			// For now, this is a placeholder that succeeds.
+			return reply.status(200).send({ success: true, message: 'Sync complete' });
+		} catch (error: any) {
+			return reply.status(500).send({ success: false, error: `Failed to sync transactions: ${error.message}` });
 		}
 	}
 

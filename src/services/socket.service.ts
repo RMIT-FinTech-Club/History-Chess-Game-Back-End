@@ -5,8 +5,7 @@ import { GameSession } from "../models/GameSession";
 import { GameStatus, PlayMode } from "../types/enum";
 import { InMemoryGameSession } from "../types/game.types";
 import { CustomSocket } from "../types/socket.types";
-import * as GameService from "./game.service";
-import { saveMove } from "./game.service";
+import { CompositionRoot } from "../configs/compositionRoot";
 //simport { StockfishService } from "./stockfish.service";
 
 let onlineUsersInterval: NodeJS.Timeout | null = null;
@@ -60,14 +59,14 @@ const endGame = async (
     : result.includes("Black")
     ? session.players[1]
     : null;
-  const eloUpdate = await GameService.updateElo(
-    fastify.prisma,
+  const { gameService } = CompositionRoot.getInstance();
+  const eloUpdate = await gameService.updateElo(
     session.gameId,
     winnerId
   );
 
   // Save the game result to the database
-  await GameService.saveGameResult(session.gameId, result);
+  await gameService.saveGameResult(session.gameId, result);
 
   // Log the winner for debugging
   console.log(
@@ -104,7 +103,7 @@ const endGame = async (
     io.emit("eloUpdated", blackEloData);
   }
 
-  await GameService.calculateGameAccuracy(session.gameId);
+  await gameService.calculateGameAccuracy(session.gameId);
 
   gameSessions.delete(session.gameId);
 };
@@ -190,7 +189,8 @@ export const handleMove = async (
     const fen = session.chess.fen();
 
     // Save move with analysis (replaces saveMove)
-    const analysisPromise = saveMove(
+    const { gameService } = CompositionRoot.getInstance();
+    const analysisPromise = gameService.saveMove(
       gameId,
       move,
       moveNumber,
@@ -218,7 +218,7 @@ export const handleMove = async (
 
     // Handle analysis result asynchronously
     analysisPromise
-      .then((analysis) => {
+      .then((analysis: any) => {
         if (analysis) {
           io.to(gameId).emit("moveAnalysis", {
             moveNumber,
@@ -230,7 +230,7 @@ export const handleMove = async (
           });
         }
       })
-      .catch((error) => {
+      .catch((error: any) => {
         console.error("Move analysis failed:", error);
         io.to(gameId).emit("moveAnalysis", {
           moveNumber,
@@ -399,8 +399,8 @@ export const handleSocketConnection = async (
       playMode: PlayMode;
       colorPreference: "white" | "black" | "random";
     }) => {
-      const result = await GameService.challengeUser(
-        fastify.prisma,
+    const { gameService } = CompositionRoot.getInstance();
+    const result = await gameService.challengeUser(
         io,
         socket,
         data.opponentId,
@@ -416,8 +416,8 @@ export const handleSocketConnection = async (
 
   // Handle challenge response
   socket.on("respondToChallenge", async (data: { accept: boolean }) => {
-    const result = await GameService.respondToChallenge(
-      fastify.prisma,
+    const { gameService } = CompositionRoot.getInstance();
+    const result = await gameService.respondToChallenge(
       io,
       socket,
       data.accept
@@ -436,9 +436,9 @@ export const handleSocketConnection = async (
 
   // Handle find match request
   socket.on("findMatch", async ({ userId, playMode, colorChoice }) => {
+    const { gameService } = CompositionRoot.getInstance();
     try {
-      const result = await GameService.findMatch(
-        fastify.prisma,
+      const result = await gameService.findMatch(
         userId,
         playMode,
         colorChoice,
@@ -476,7 +476,8 @@ export const handleSocketConnection = async (
 
   // Handle cancel matchmaking
   socket.on("cancelMatchmaking", ({ userId }) => {
-    GameService.removeFromMatchmaking(userId);
+    const { gameService } = CompositionRoot.getInstance();
+    gameService.removeFromMatchmaking(userId);
     socket.emit("matchmakingCancelled");
   });
 
@@ -508,7 +509,8 @@ export const handleSocketConnection = async (
       console.log("Creating new game session for:", gameId);
 
       // Get move history from database to restore game state
-      const moves = await GameService.getGameMoves(gameId);
+      const { gameService } = CompositionRoot.getInstance();
+      const moves = await gameService.getGameMoves(gameId);
       const chess = new Chess();
 
       // Replay moves to get current position
@@ -552,7 +554,8 @@ export const handleSocketConnection = async (
 
       // Send move history for rejoining players
       if (isRejoin) {
-        const moves = await GameService.getGameMoves(gameId);
+        const { gameService } = CompositionRoot.getInstance();
+      const moves = await gameService.getGameMoves(gameId);
         if (moves && moves.length > 0) {
           socket.emit("moveHistory", { moves });
         }
@@ -605,7 +608,8 @@ export const handleSocketConnection = async (
       socket.join(gameId);
 
       // Send move history to rejoining player
-      const moves = await GameService.getGameMoves(gameId);
+      const { gameService } = CompositionRoot.getInstance();
+      const moves = await gameService.getGameMoves(gameId);
       if (moves && moves.length > 0) {
         socket.emit("moveHistory", { moves });
       }

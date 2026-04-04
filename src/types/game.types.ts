@@ -30,8 +30,11 @@ export interface QueuedPlayer {
 }
 
 export interface GameHistoryItem {
+    gameId?: string;
+    opponentId?: string | null;
     opponentName: string | null;
     gameMode: string;
     totalTime: number;
     result: 'Victory' | 'Defeat' | 'Draw';
+    createdAt?: Date;
 }

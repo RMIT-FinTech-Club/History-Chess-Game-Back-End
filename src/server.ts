@@ -1,10 +1,16 @@
+import * as dotenv from 'dotenv';
+dotenv.config();
+
+import dns from 'node:dns';
+// Fix for Node.js SRV lookup issues on some machines
+dns.setServers(['8.8.8.8', '8.8.4.4']);
+
 import Fastify, { FastifyInstance } from 'fastify';
 import fastifyCors from '@fastify/cors';
 import fastifyJwt from '@fastify/jwt';
 import fastifyOAuth2 from '@fastify/oauth2';
 import fastifyMultipart from '@fastify/multipart';
 import { postgresPrisma } from './configs/prismaClient';
-import * as dotenv from 'dotenv';
 import neonPlugin from './plugins/neon';
 import mongodbPlugin from './plugins/mongodb';
 import websocketPlugin from './plugins/websocket';
@@ -12,15 +18,16 @@ import prismaPlugin from './plugins/prisma';
 import walletRoutes from './routes/wallet.routes';
 import userRoutes from './routes/user.routes';
 import gameRoutes from './routes/game.routes';
+import marketRoutes from './routes/market.routes';
+import questRoutes from './routes/quest.routes';
 import { PrismaClient } from '@prisma/client';
 import basePath from './types/pathConfig.ts';
-
-// ✅ NEW: Import RabbitMQ
 import { initializeRabbitMQ, getRabbitMQ } from './configs/rabbitmq.ts';
 
-dotenv.config();
+import { config } from './configs/unifiedConfig';
+import { CompositionRoot } from './configs/compositionRoot';
 
-const port: number = parseInt(process.env.PORT || '8080', 10);
+const port = config.port;
 
 const server: FastifyInstance = Fastify({ logger: true });
 
@@ -34,23 +41,10 @@ server.register(fastifyCors, {
 
 // Register JWT
 server.register(fastifyJwt, {
-  secret: process.env.JWT_SECRET || 'your-secret-key',
+  secret: config.jwt.secret,
 });
 
-// Register OAuth2 for Google
-server.register(fastifyOAuth2, {
-  name: 'googleOAuth2',
-  scope: ['profile', 'email'],
-  credentials: {
-    client: {
-      id: process.env.GOOGLE_CLIENT_ID!,
-      secret: process.env.GOOGLE_CLIENT_SECRET!,
-    },
-    auth: fastifyOAuth2.GOOGLE_CONFIGURATION,
-  },
-  startRedirectPath: '/users/google-auth',
-  callbackUri: `${basePath}/users/google-callback`,
-});
+// Registered OAuth2 for Google is handled via manual routes in userRoutes
 
 // Register multipart for file uploads
 server.register(fastifyMultipart, {
@@ -111,10 +105,6 @@ server.register(neonPlugin);
 server.register(websocketPlugin);
 server.register(prismaPlugin);
 
-// Register Routes
-server.register(userRoutes);
-server.register(gameRoutes, { prefix: '/game' });
-server.register(walletRoutes);
 
 server.ready(() => {
   server.log.info('Server is ready!');
@@ -217,7 +207,18 @@ const start = async () => {
     await initializeRabbitMQ();
     server.log.info('✅ RabbitMQ initialized successfully');
 
-    // 3. Start Fastify server
+    // 3. Initialize Composition Root (DI)
+    CompositionRoot.initialize(server, postgresPrisma);
+    server.log.info('✅ Composition Root initialized');
+
+    // 4. Register Routes (After DI)
+    server.register(userRoutes);
+    server.register(gameRoutes, { prefix: '/game' });
+    server.register(walletRoutes);
+    server.register(marketRoutes);
+    server.register(questRoutes);
+
+    // 4. Start Fastify server
     await server.listen({ port: port, host: '0.0.0.0' });
     server.log.info(`🚀 Server running on ${basePath}`);
     

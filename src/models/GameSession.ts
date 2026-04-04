@@ -12,6 +12,8 @@ export interface IGameSession {
     status: GameStatus;
     playMode: PlayMode;
     timeLimit: number;
+    whitePlayerElo?: number;
+    blackPlayerElo?: number;
     moves: IMove[];
     challengedOpponentId: string | null;
     finalFen: string | null;
@@ -78,6 +80,8 @@ const GameSessionSchema = new Schema<IGameSession>({
     status: { type: String, required: true, enum: ['waiting', 'pending', 'active', 'finished'], default: 'waiting' },
     playMode: { type: String, required: true, enum: ['bullet', 'blitz', 'rapid'] },
     timeLimit: { type: Number, required: true },
+    whitePlayerElo: { type: Number },
+    blackPlayerElo: { type: Number },
     moves: [MoveSchema],
     challengedOpponentId: { type: String, default: null },
     finalFen: { type: String, default: null },

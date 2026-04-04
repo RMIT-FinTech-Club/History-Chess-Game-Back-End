@@ -1,18 +1,23 @@
 import { getRabbitMQ } from '../../configs/rabbitmq.ts';
 
 /**
- * Reward Message Structure
+ * Message Structure for RabbitMQ messages
  */
-export interface RewardMessage {
+export interface GenericBlockchainMessage {
   userId: string;
+  transactionType: 'reward' | 'buyItem' | 'auctionWin';
+  transactionId?: string; // MongoDB ID for TransactionHistory or GameReward
+  timestamp: Date;
+}
+
+export interface RewardMessage extends GenericBlockchainMessage {
+  transactionType: 'reward';
   username?: string;
   walletAddress: string;
-  amount: string; // In wei (string to handle BigInt)
+  amount: string; // In wei
   gameId: string;
   matchType: 'PvP' | 'Bot';
   gameRewardId: string; // MongoDB ObjectId as string
-  timestamp: Date;
-  transactionType: 'reward';
   metadata?: {
     gameResult?: string;
     opponentId?: string;
@@ -20,20 +25,33 @@ export interface RewardMessage {
   };
 }
 
+export interface BuyItemMessage extends GenericBlockchainMessage {
+  transactionType: 'buyItem';
+  itemId: string;
+  quantity: number;
+  totalCost: string; // In wei
+}
+
+export interface AuctionWinMessage extends GenericBlockchainMessage {
+  transactionType: 'auctionWin';
+  winnerId: string;
+  sellerId: string;
+  nftId: string;
+  amount: string; // In wei
+}
+
+export type BlockchainMessage = RewardMessage | BuyItemMessage | AuctionWinMessage;
+
 /**
- * Publishes reward messages to RabbitMQ queue
+ * Publishes messages to RabbitMQ queue
  */
 export class RewardPublisher {
-  static async publishReward(message: RewardMessage): Promise<boolean> {
+  static async publishMessage(message: BlockchainMessage): Promise<boolean> {
     try {
-      console.log('\n Publishing reward message to RabbitMQ...');
-      console.log(`   User: ${message.userId}`);
-      console.log(`   Amount: ${message.amount} wei`);
-      console.log(`   Game: ${message.gameId}`);
-
+      console.log(`\n Publishing ${message.transactionType} message to RabbitMQ...`);
+      
       const rabbitMQ = getRabbitMQ();
 
-      // Check connection
       if (!rabbitMQ.isConnected()) {
         console.error('⚠️ RabbitMQ not connected');
         throw new Error('RabbitMQ connection not available');
@@ -42,103 +60,32 @@ export class RewardPublisher {
       const channel = rabbitMQ.getChannel();
       const queues = rabbitMQ.getQueues();
 
-      // Convert message to Buffer
       const messageBuffer = Buffer.from(JSON.stringify(message));
 
-      // Publish to queue
       const published = channel.sendToQueue(
         queues.rewardQueue,
         messageBuffer,
         {
-          persistent: true, // Message is saved to Disk ---> if the server restarts or crashes, the message will be saved
+          persistent: true,
           contentType: 'application/json',
           timestamp: Date.now(),
-          messageId: `reward-${message.gameRewardId}`,
-          headers: {
-            userId: message.userId,
-            gameId: message.gameId,
-            matchType: message.matchType,
-            version: '1.0',
-          },
+          messageId: `${message.transactionType}-${message.transactionId || Date.now()}`,
         }
       );
 
       if (published) {
-        console.log(`✅ Reward message published successfully`);
-        console.log(`   Queue: ${queues.rewardQueue}`);
-        console.log(`   Message ID: reward-${message.gameRewardId}`);
+        console.log(`✅ ${message.transactionType} message published successfully`);
         return true;
-      } else {
-        console.warn('⚠️  Queue buffer full, message will be buffered');
-        return false;
       }
-
+      return false;
     } catch (error) {
-      console.error('⚠️ Failed to publish reward message:', error);
+      console.error('⚠️ Failed to publish message:', error);
       throw error;
     }
   }
 
-  /**
-   * Publish multiple rewards in batch -- 
-   */
-  static async publishBatch(messages: RewardMessage[]): Promise<{
-    success: number;
-    failed: number;
-    errors: Array<{ message: RewardMessage; error: string }>;
-  }> {
-    console.log(`\n📤 Publishing ${messages.length} reward messages...`);
-
-    let success = 0;
-    let failed = 0;
-    const errors: Array<{ message: RewardMessage; error: string }> = [];
-
-    for (const message of messages) {
-      try {
-        await this.publishReward(message);
-        success++;
-      } catch (error) {
-        failed++;
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        errors.push({ message, error: errorMessage });
-        console.error(`❌ Failed to publish reward for ${message.userId}: ${errorMessage}`);
-      }
-    }
-
-    console.log(`\n📊 Batch publish results:`);
-    console.log(`   ✅ Success: ${success}/${messages.length}`);
-    console.log(`   ❌ Failed: ${failed}/${messages.length}`);
-
-    return { success, failed, errors };
-  }
-
-  /**
-   * Get queue statistics
-   */
-  static async getQueueStats(): Promise<{
-    messageCount: number;
-    consumerCount: number;
-  } | null> {
-    try {
-      const rabbitMQ = getRabbitMQ();
-      
-      if (!rabbitMQ.isConnected()) {
-        return null;
-      }
-
-      const channel = rabbitMQ.getChannel();
-      const queues = rabbitMQ.getQueues();
-
-      const queueInfo = await channel.checkQueue(queues.rewardQueue);
-
-      return {
-        messageCount: queueInfo.messageCount,
-        consumerCount: queueInfo.consumerCount,
-      };
-
-    } catch (error) {
-      console.error('⚠️ Failed to get queue stats:', error);
-      return null;
-    }
+  // Backwards compatibility or specific helper
+  static async publishReward(message: RewardMessage): Promise<boolean> {
+      return this.publishMessage(message);
   }
 }

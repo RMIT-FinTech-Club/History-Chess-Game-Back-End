@@ -1,5 +1,5 @@
 {
-    "exec": "tsx src/server.ts",
+    "exec": "tsx --require dotenv/config src/server.ts",
     "watch": [
         "src"
     ],

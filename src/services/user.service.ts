@@ -18,6 +18,7 @@ export interface CreateUserInput {
 	username: string;
 	email: string;
 	password: string;
+	verificationCode: string;
 	walletAddress?: string;
 }
 
@@ -41,6 +42,7 @@ interface UserTokenPayload {
 	id: string;
 	username: string;
 	googleAuth: boolean;
+	role: string;
 }
 
 interface TempTokenPayload {
@@ -58,33 +60,38 @@ interface UpdateData {
 	avatarUrl?: string | null;
 }
 
+import { UserRepository } from '../repositories/UserRepository';
+import { config } from '../configs/unifiedConfig';
+
 export class UserService {
 	private jwtSecret: string;
 	private transporter: nodemailer.Transporter;
 	private resetCodes: Map<string, ResetCodeEntry>;
+	private verificationCodes: Map<string, ResetCodeEntry>;
 	private logger: FastifyInstance['log'];
 	private googleClient: OAuth2Client;
 	private blockchainService: BlockchainService;
 
-	constructor(fastify: FastifyInstance) {
-		this.jwtSecret = process.env.JWT_SECRET || 'your-secret-key';
+	constructor(
+        fastify: FastifyInstance, 
+        private readonly userRepository: UserRepository
+    ) {
+		this.jwtSecret = config.jwt.secret;
 		this.resetCodes = new Map();
+		this.verificationCodes = new Map();
 		this.logger = fastify.log;
 		this.transporter = nodemailer.createTransport({
 			service: 'gmail',
 			auth: {
-				user: process.env.EMAIL_USER || 'your-email@gmail.com',
-				pass: process.env.EMAIL_PASS || 'your-app-password',
+				user: config.google.emailUser || 'your-email@gmail.com',
+				pass: config.google.emailPass || 'your-app-password',
 			},
 		});
-		if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
-			this.logger.error('Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET in environment variables');
-			throw new Error('Google OAuth configuration is incomplete');
-		}
+		
 		this.googleClient = new OAuth2Client(
-			process.env.GOOGLE_CLIENT_ID,
-			process.env.GOOGLE_CLIENT_SECRET,
-			`${basePath}/users/google-callback`
+			config.google.clientId,
+			config.google.clientSecret,
+			`${config.app.backendUrl}/users/google-callback`
 		);
 		this.blockchainService = new BlockchainService();
 	}
@@ -174,13 +181,13 @@ export class UserService {
 		return web3.utils.toChecksumAddress(trimmed);
 	}
 
-	private generateToken(id: string, username: string, googleAuth: boolean): string {
+	private generateToken(id: string, username: string, googleAuth: boolean, role: string): string {
 		if (!validator.isUUID(id)) {
 			this.logger.error(`Invalid UUID for token generation: ${id}`);
 			throw new Error('Internal error: invalid user ID');
 		}
 
-		return jwt.sign({ id, username, googleAuth } as UserTokenPayload, this.jwtSecret, { expiresIn: '1h', noTimestamp: true });
+		return jwt.sign({ id, username, googleAuth, role } as UserTokenPayload, this.jwtSecret, { expiresIn: '1h', noTimestamp: true });
 	}
 
 	async createUser(data: CreateUserInput): Promise<{
@@ -218,13 +225,23 @@ export class UserService {
 			});
 			if (emailCheck) throw new Error('This email is already registered. Please use a different email.');
 
+			// Verify verification code
+			const storedVerification = this.verificationCodes.get(cleanEmail);
+			if (!storedVerification || storedVerification.code !== data.verificationCode) {
+				throw new Error('Invalid or expired verification code');
+			}
+			if (Date.now() > storedVerification.expires) {
+				this.verificationCodes.delete(cleanEmail);
+				throw new Error('Verification code expired');
+			}
+
 			const hashedPassword = await bcrypt.hash(cleanPassword, 10);
 
 			// Generate a new wallet address
 			const walletAddress = await this.blockchainService.createWallet();
 
 			// Start a transaction for Prisma
-			const user = await prisma.$transaction(async (prisma) => {
+			const user = await prisma.$transaction(async (prisma: any) => {
 				return prisma.users.create({
 					data: {
 						id: crypto.randomUUID(),
@@ -268,8 +285,10 @@ export class UserService {
 
 				throw new Error('Failed to create wallet address. Please try again.');
 			}
+			// Delete verification code after successful creation
+			this.verificationCodes.delete(cleanEmail);
 
-			const token = this.generateToken(user.id, user.username, user.googleAuth);
+			const token = this.generateToken(user.id, user.username, user.googleAuth, user.role);
 
 			return {
 				token,
@@ -285,6 +304,52 @@ export class UserService {
 			};
 		} catch (error: unknown) {
 			const message = error instanceof Error ? error.message : 'An unexpected error occurred during user creation.';
+			throw new Error(message);
+		}
+	}
+
+	async signupVerification(email: string): Promise<void> {
+		try {
+			const cleanEmail = this.validateEmail(email);
+
+			// Check if email already registered
+			const emailCheck = await prisma.users.findFirst({
+				where: { email: cleanEmail },
+			});
+			if (emailCheck) {
+				throw new Error('This email is already registered. Please use a different email.');
+			}
+
+			// Generate 6-digit code
+			const code = Math.floor(100000 + Math.random() * 900000).toString();
+			const expires = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+			this.verificationCodes.set(cleanEmail, { code, expires });
+
+			// Send email
+			const mailOptions = {
+				from: process.env.EMAIL_USER,
+				to: cleanEmail,
+				subject: 'Verification Code for Vietnamese History Chess Game',
+				html: `
+					<div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
+						<h2 style="color: #d4af37;">Welcome to History Chess Game!</h2>
+						<p>Thank you for signing up. Please use the following code to verify your email address:</p>
+						<div style="background: #f4f4f4; padding: 15px; text-align: center; font-size: 24px; font-weight: bold; letter-spacing: 5px; color: #d4af37; border: 1px solid #ddd; margin: 20px 0;">
+							${code}
+						</div>
+						<p>This code will expire in 10 minutes.</p>
+						<p>If you didn't request this, please ignore this email.</p>
+						<hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+						<p style="font-size: 12px; color: #777;">&copy; ${new Date().getFullYear()} Vietnamese History Chess Game Team</p>
+					</div>
+				`,
+			};
+
+			await this.transporter.sendMail(mailOptions);
+			this.logger.info(`Verification code sent to ${cleanEmail}`);
+		} catch (error: unknown) {
+			const message = error instanceof Error ? error.message : 'An unexpected error occurred during signup verification.';
 			throw new Error(message);
 		}
 	}
@@ -316,7 +381,7 @@ export class UserService {
 
 			if (!user) return null;
 
-			const token = this.generateToken(user.id, user.username, user.googleAuth);
+			const token = this.generateToken(user.id, user.username, user.googleAuth, user.role);
 			return {
 				token,
 				id: user.id,
@@ -363,7 +428,7 @@ export class UserService {
 
 			if (!user) return null;
 
-			const token = this.generateToken(user.id, user.username, user.googleAuth);
+			const token = this.generateToken(user.id, user.username, user.googleAuth, user.role);
 			return {
 				token,
 				id: user.id,
@@ -410,7 +475,7 @@ export class UserService {
 
 			const total = await prisma.users.count();
 
-			const usersWithoutPasswords = users.map((user) => ({
+			const usersWithoutPasswords = users.map((user: any) => ({
 				id: user.id,
 				username: user.username,
 				email: user.email,
@@ -461,7 +526,7 @@ export class UserService {
 				data: updateData,
 			});
 
-			const token = this.generateToken(updatedUser.id, updatedUser.username, updatedUser.googleAuth);
+			const token = this.generateToken(updatedUser.id, updatedUser.username, updatedUser.googleAuth, updatedUser.role);
 			return {
 				token,
 				id: updatedUser.id,
@@ -520,7 +585,7 @@ export class UserService {
 
 			console.log('Updated user:', updatedUser);
 
-			const newToken = this.generateToken(updatedUser.id, updatedUser.username, updatedUser.googleAuth);
+			const newToken = this.generateToken(updatedUser.id, updatedUser.username, updatedUser.googleAuth, updatedUser.role);
 			console.log('Generated token in updateProfile:', newToken);
 
 			return {
@@ -619,7 +684,7 @@ export class UserService {
 				throw new Error('This account uses Google login. Please use Google to sign in or provide a valid token.');
 			}
 
-			const newToken = this.generateToken(user.id, user.username, user.googleAuth);
+			const newToken = this.generateToken(user.id, user.username, user.googleAuth, user.role);
 			return {
 				token: newToken,
 				id: user.id,
@@ -769,7 +834,7 @@ export class UserService {
 
 			this.resetCodes.delete(cleanEmail);
 
-			const newToken = this.generateToken(user.id, user.username, user.googleAuth);
+			const newToken = this.generateToken(user.id, user.username, user.googleAuth, user.role);
 			return {
 				token: newToken,
 				id: user.id,
@@ -854,8 +919,14 @@ export class UserService {
 		avatarUrl: string | null;
 		language: string;
 		elo: number;
+		level: number;
+		dynasty: string;
+		dynastyLevel: number;
+		dynastyXp: number;
+		role: string;
 		createdAt: Date;
 		updatedAt: Date;
+		googleAuth: boolean;
 	}> {
 		try {
 			this.logger.info(`Received Google callback with code: ${code}, state: ${state}`);
@@ -886,7 +957,7 @@ export class UserService {
 					throw new Error('This email has been used already for a standard account. Please use a different Google account or sign in with your password.');
 				}
 				this.logger.info(`Existing Google user found: ${email}`);
-				const token = this.generateToken(existingUser.id, existingUser.username, existingUser.googleAuth);
+				const token = this.generateToken(existingUser.id, existingUser.username, existingUser.googleAuth, existingUser.role);
 				return {
 					token,
 					id: existingUser.id,
@@ -896,8 +967,14 @@ export class UserService {
 					avatarUrl: existingUser.avatarUrl,
 					language: existingUser.language,
 					elo: existingUser.elo,
+					level: existingUser.level,
+					dynasty: existingUser.dynasty,
+					dynastyLevel: existingUser.dynastyLevel,
+					dynastyXp: existingUser.dynastyXp,
+					role: existingUser.role,
 					createdAt: existingUser.createdAt,
 					updatedAt: existingUser.updatedAt,
+					googleAuth: existingUser.googleAuth,
 				};
 			}
 
@@ -920,8 +997,14 @@ export class UserService {
 		avatarUrl: string | null;
 		language: string;
 		elo: number;
+		level: number;
+		dynasty: string;
+		dynastyLevel: number;
+		dynastyXp: number;
+		role: string;
 		createdAt: Date;
 		updatedAt: Date;
+		googleAuth: boolean;
 	}> {
 		try {
 			const decoded = jwt.verify(tempToken, this.jwtSecret) as TempTokenPayload;
@@ -945,18 +1028,39 @@ export class UserService {
 
 			const randomPassword = Math.random().toString(36).slice(-12);
 			const hashedPassword = await bcrypt.hash(randomPassword, 10);
+
+			// Generate a wallet address for the Google user
+			const walletAddress = await this.blockchainService.createWallet();
+
 			const user = await prisma.users.create({
 				data: {
 					id: crypto.randomUUID(),
 					username: cleanUsername,
 					email,
 					hashedPassword,
+					walletAddress,
 					googleAuth: true,
 				},
 			});
 
+			// Create PlayerBalance in MongoDB (same as standard registration)
+			if (walletAddress) {
+				try {
+					await PlayerBalance.create({
+						userId: user.id,
+						walletAddress: walletAddress.toLowerCase(),
+						needsSync: true,
+					});
+				} catch (mongoError: any) {
+					this.logger.error(`Failed to create PlayerBalance for Google user: ${mongoError.message}`);
+					// Rollback Prisma user creation
+					await prisma.users.delete({ where: { id: user.id } });
+					throw new Error('Failed to create PlayerBalance. User creation rolled back.');
+				}
+			}
+
 			this.logger.info(`Created new user from Google login: ${email}, username: ${cleanUsername}`);
-			const token = this.generateToken(user.id, user.username, user.googleAuth);
+			const token = this.generateToken(user.id, user.username, user.googleAuth, user.role);
 			return {
 				token,
 				id: user.id,
@@ -966,8 +1070,14 @@ export class UserService {
 				avatarUrl: user.avatarUrl,
 				language: user.language,
 				elo: user.elo,
+				level: user.level,
+				dynasty: user.dynasty,
+				dynastyLevel: user.dynastyLevel,
+				dynastyXp: user.dynastyXp,
+				role: user.role,
 				createdAt: user.createdAt,
 				updatedAt: user.updatedAt,
+				googleAuth: user.googleAuth,
 			};
 		} catch (error: unknown) {
 			const message = error instanceof Error ? error.message : 'An unexpected error occurred during Google login completion.';

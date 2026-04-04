@@ -1,11 +1,13 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import jwt from 'jsonwebtoken';
+import { config } from '../configs/unifiedConfig';
 
 // Define JWT payload interface
 interface UserPayload {
 	id: string;
 	username: string;
 	googleAuth: boolean;
+	role: string;
 }
 
 // Extend FastifyRequest with custom authUser property
@@ -61,7 +63,7 @@ export async function authenticate(
 	}
 
 	const token = authHeader.replace('Bearer ', '');
-	const jwtSecret = process.env.JWT_SECRET || 'your-secret-key';
+	const jwtSecret = config.jwt.secret;
 
 	try {
 		// Use token, not authHeader for verification
@@ -99,6 +101,21 @@ export async function authorize(
 	if (userIdParam && request.authUser && request.authUser.id !== userIdParam) {
 		request.log.warn(`Unauthorized access attempt: userId=${request.authUser.id}, requestedId=${userIdParam}`);
 		reply.status(403).send({ message: 'You are not authorized to access this resource' });
+		return;
+	}
+}
+
+// Admin Authorization: Check if user has admin role
+export async function requireAdmin(
+	request: FastifyRequest,
+	reply: FastifyReply
+): Promise<void> {
+	if (!request.authUser || request.authUser.role !== 'admin') {
+		request.log.warn(`Forbidden access attempt: user=${request.authUser?.username}, role=${request.authUser?.role}`);
+		reply.status(403).send({ 
+			success: false, 
+			message: 'Admin privileges required' 
+		});
 		return;
 	}
 }

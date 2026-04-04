@@ -1,10 +1,13 @@
 import amqp from 'amqplib';
 
+import { config } from './unifiedConfig';
+
 export interface RabbitMQConfig {
   url: string;
   queues: {
-    rewardQueue: string; // recieves messages from the game server when there are winners
-    rewardDLQ: string; // recieves failed messages
+    rewardQueue: string;
+    rewardDLQ: string;
+    stockfishQueue: string;
   };
   prefetchCount: number;
   reconnectDelay: number;
@@ -24,12 +27,13 @@ export class RabbitMQConnection {
 
   private constructor() {
     this.config = {
-      url: process.env.RABBITMQ_URL,
+      url: config.rabbitmq.url,
       queues: {
-        rewardQueue: process.env.RABBITMQ_REWARD_QUEUE,
-        rewardDLQ: process.env.RABBITMQ_REWARD_DLQ,
+        rewardQueue: config.rabbitmq.queues.rewardQueue,
+        rewardDLQ: config.rabbitmq.queues.rewardDLQ,
+        stockfishQueue: config.rabbitmq.queues.stockfishQueue,
       },
-      prefetchCount: parseInt(process.env.RABBITMQ_PREFETCH_COUNT || '1', 10), 
+      prefetchCount: config.rabbitmq.prefetchCount,
       reconnectDelay: 5000,
       maxReconnectAttempts: 3,
     };
@@ -124,6 +128,12 @@ export class RabbitMQConnection {
       },
     });
     console.log(`   ✅ Main queue created: ${this.config.queues.rewardQueue}`);
+
+    // Setup Stockfish Queue
+    await this.channel.assertQueue(this.config.queues.stockfishQueue, {
+      durable: true,
+    });
+    console.log(`   ✅ Stockfish queue created: ${this.config.queues.stockfishQueue}`);
   }
 
   public getChannel(): Channel {
