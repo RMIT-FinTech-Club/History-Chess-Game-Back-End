@@ -1,12 +1,11 @@
-FROM node:20-alpine AS base
+FROM node:20-alpine
 
-# Install dependencies and build
-FROM base AS builder
 WORKDIR /app
 
 # Copy package and lock files
 COPY package.json package-lock.json ./
-# Install ALL dependencies, including dev (we need tsc and prisma)
+
+# Install ALL dependencies (including dev tools like tsx/ts-node required for runtime)
 RUN npm install --legacy-peer-deps --ignore-scripts
 
 # Copy the rest of the application
@@ -15,26 +14,14 @@ COPY . .
 # Generate Prisma client
 RUN npx prisma generate
 
-# Build the TypeScript application
-RUN npm run build
-
-# Production image
-FROM base AS runner
-WORKDIR /app
+# We don't run a build step because tsconfig.json has 'noEmit: true' and 'allowImportingTsExtensions: true'.
+# TypeScript refuses to output JS files when importing .ts extensions natively.
+# Therefore, we run the app using tsx natively just like local development.
 
 ENV NODE_ENV=production
 
-# Copy only production dependencies or reinstall them
-COPY package.json package-lock.json ./
-RUN npm install --omit=dev --ignore-scripts --legacy-peer-deps
-
-# Copy generated Prisma files and build artifacts
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=builder /app/dist ./dist
-
-# Expose backend port - adjust if your server uses a different port internally
+# Expose backend port
 EXPOSE 8080 
 ENV PORT=8080
 
-CMD ["node", "dist/server.js"]
+CMD ["npx", "tsx", "src/server.ts"]
