@@ -9,8 +9,7 @@ async function checkFailures() {
         console.log('--- Last 5 Failed Transactions ---');
         console.log(JSON.stringify(failures, null, 2));
 
-        const pendingRewards = await mongoose.model('GameReward').find({ confirmed: false }).sort({ createdAt: -1 }).limit(5).toArray?.() || 
-                               await mongoose.model('GameReward').find({ confirmed: false }).sort({ createdAt: -1 }).limit(5);
+        const pendingRewards = await mongoose.model('GameReward').find({ confirmed: false }).sort({ createdAt: -1 }).limit(5);
         console.log('\n--- Last 5 Unconfirmed Rewards ---');
         console.log(JSON.stringify(pendingRewards, null, 2));
 
