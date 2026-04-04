@@ -7,7 +7,7 @@ WORKDIR /app
 # Copy package and lock files
 COPY package.json package-lock.json ./
 # Install ALL dependencies, including dev (we need tsc and prisma)
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 
 # Copy the rest of the application
 COPY . .
@@ -26,7 +26,7 @@ ENV NODE_ENV=production
 
 # Copy only production dependencies or reinstall them
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --ignore-scripts
+RUN npm ci --omit=dev --ignore-scripts --legacy-peer-deps
 
 # Copy generated Prisma files and build artifacts
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
